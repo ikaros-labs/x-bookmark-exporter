@@ -10,6 +10,7 @@ from .export import process
 from .storage import write_json
 from .migration import migrate
 from .monitor import watch
+from .paths import assets_directory
 
 
 def main():
@@ -36,6 +37,9 @@ def main():
     monitor.add_argument("--once", action="store_true", help="Run one polling cycle, for service timers")
     monitor.add_argument("--keep-bookmarks", action="store_true")
     monitor.add_argument("--api-vocabulary", choices=["tweet", "post"], default="tweet")
+    for command in (export, monitor):
+        command.add_argument("--assets-folder", default=os.environ.get("X_BOOKMARK_ASSETS_FOLDER"),
+                             help="Media folder relative to vault root (default: assets inside the notes folder); also X_BOOKMARK_ASSETS_FOLDER")
     args = parser.parse_args()
     args.credentials = args.credentials.expanduser().resolve()
     args.credentials.parent.mkdir(parents=True, exist_ok=True)
@@ -56,6 +60,7 @@ def main():
             output = (vault / args.folder).resolve()
             if not output.is_relative_to(vault):
                 parser.error("--folder must remain inside the vault")
+            assets_dir = assets_directory(vault, output, args.assets_folder) if args.command != "migrate" else None
             output.mkdir(parents=True, exist_ok=True)
             internal = output / ".x-bookmarks"
             internal.mkdir(exist_ok=True)
@@ -66,7 +71,8 @@ def main():
                     return
                 client = Client(args.credentials)
                 if args.command == "watch":
-                    watch(client, output, args.api_vocabulary, args.keep_bookmarks, args.interval, args.once)
+                    watch(client, output, args.api_vocabulary, args.keep_bookmarks, args.interval, args.once,
+                          assets_dir=assets_dir)
                     return
                 user_id = client.user_id()
                 state_path = internal / f"state-{user_id}.json"
@@ -81,7 +87,8 @@ def main():
                 previous.update(items)
                 write_json(inventory_path, previous)
                 print(f"Collected {len(items)} bookmarks.", flush=True)
-                failed = process(client, user_id, items, output, state, state_path, args.keep_bookmarks)
+                failed = process(client, user_id, items, output, state, state_path, args.keep_bookmarks,
+                                 assets_dir=assets_dir)
                 print(f"Finished: {len(items) - failed} successful, {failed} failed. Output: {output}")
                 if failed:
                     raise SystemExit(1)

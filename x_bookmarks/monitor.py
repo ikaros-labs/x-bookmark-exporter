@@ -12,7 +12,7 @@ def read_json(path):
     return json.loads(path.read_text()) if path.exists() else {}
 
 
-def poll(client, output, vocabulary="tweet", keep=False):
+def poll(client, output, vocabulary="tweet", keep=False, assets_dir=None):
     user_id = client.user_id()
     internal = output / ".x-bookmarks"
     state_path = internal / f"state-{user_id}.json"
@@ -54,7 +54,8 @@ def poll(client, output, vocabulary="tweet", keep=False):
                 item["first_seen_at"] = entry["first_seen_at"]
                 previous[post_id] = item
                 write_json(inventory_path, previous)
-            failures = process(client, user_id, {post_id: item}, output, state, state_path, keep)
+            failures = process(client, user_id, {post_id: item}, output, state, state_path, keep,
+                               assets_dir=assets_dir)
             if failures:
                 raise RuntimeError(state[post_id].get("last_error", "Export failed"))
             entry.pop("last_error", None)
@@ -74,10 +75,10 @@ def poll(client, output, vocabulary="tweet", keep=False):
     return failed
 
 
-def watch(client, output, vocabulary="tweet", keep=False, interval=300, once=False):
+def watch(client, output, vocabulary="tweet", keep=False, interval=300, once=False, assets_dir=None):
     while True:
         try:
-            poll(client, output, vocabulary, keep)
+            poll(client, output, vocabulary, keep, assets_dir=assets_dir)
         except (OSError, ValueError, RuntimeError) as error:
             if once:
                 raise

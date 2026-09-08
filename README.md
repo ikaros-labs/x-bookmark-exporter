@@ -123,6 +123,31 @@ than overwriting your content. Restore the original files to retry automatic rem
 `--limit` processes the first N returned bookmarks. With `--keep-bookmarks`, repeated
 limited runs may revisit those same bookmarks; remove the limit to process the rest.
 
+## Assets folder
+
+By default, media is saved under `assets/POST_ID/` inside the notes folder, such as
+`vault/X/assets/123/1.jpg`. To use a shared vault attachment directory:
+
+```sh
+python3 -m x_bookmarks export --vault /path/to/vault --assets-folder Attachments/X
+python3 -m x_bookmarks watch --vault /path/to/vault --assets-folder "Attachments/X media"
+```
+
+An explicit `--assets-folder` is relative to the **vault root**, independently of
+`--folder`. The examples place media under `vault/Attachments/X/POST_ID/` or
+`vault/Attachments/X media/POST_ID/`. Paths outside the vault and application-state
+directories are rejected. Local embeds and verification records point to the chosen
+location. Shared folders outside the notes directory use relative Markdown embeds.
+
+You can also set `X_BOOKMARK_ASSETS_FOLDER`; the command-line flag takes precedence.
+For the systemd service, add that variable to `~/.config/x-bookmark-exporter/service.env`.
+The service reads it on its next cycle. No value preserves the existing default.
+
+This setting applies to **new exports**. Existing notes, media, and receipts are
+reused at their original locations; changing the setting does not move them.
+When backing up exports, include the configured media directory as well as the notes
+and `.x-bookmarks` state.
+
 ## Continuous monitoring
 
 ```sh

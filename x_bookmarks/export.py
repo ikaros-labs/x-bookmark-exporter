@@ -100,7 +100,10 @@ def render(item, media_links):
     if item.get("export_warnings"):
         body += "\n> Partial export. Some content was unavailable; see export_warnings in the frontmatter.\n"
     for relative, alt in media_links:
-        body += f"\n![[{relative}]]\n"
+        if relative.startswith("../") or any(c in relative for c in "[]#|^<>\n\r"):
+            body += f"\n![]({urllib.parse.quote(relative, safe='/.-_~')})\n"
+        else:
+            body += f"\n![[{relative}]]\n"
         if alt:
             body += f"\n{alt}\n"
     polls = {p["id"]: p for p in item["includes"].get("polls", [])}
@@ -114,7 +117,7 @@ def render(item, media_links):
     return body
 
 
-def archive(item, output):
+def archive(item, output, assets_dir=None):
     post = item["post"]
     post_id = post["id"]
     if not re.fullmatch(r"[0-9]+", post_id):
@@ -151,8 +154,9 @@ def archive(item, output):
             if key not in media:
                 raise ValueError("Attached media missing from API response")
             source, extension = media_source(media[key])
-            relative = f"assets/{post_id}/{index}{extension}"
-            download(source, output / relative)
+            destination = (assets_dir if assets_dir is not None else output / "assets") / post_id / f"{index}{extension}"
+            relative = Path(os.path.relpath(destination, output)).as_posix()
+            download(source, destination)
             files.append(relative)
             links.append((relative, media[key].get("alt_text", "")))
         except (OSError, ValueError) as error:
@@ -179,13 +183,13 @@ def verified(output, files):
                                for name, expected in files.items())
 
 
-def process(client, user_id, items, output, state, state_path, keep=False):
+def process(client, user_id, items, output, state, state_path, keep=False, assets_dir=None):
     failed = 0
     for post_id, item in items.items():
         record = state.setdefault(post_id, {})
         try:
             if not record.get("files"):
-                record["files"] = archive(item, output)
+                record["files"] = archive(item, output, assets_dir=assets_dir)
                 write_json(state_path, state)
             if not verified(output, record["files"]):
                 raise ValueError("Saved files changed or are missing; bookmark retained")
