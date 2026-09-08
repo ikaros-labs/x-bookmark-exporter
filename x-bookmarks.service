@@ -1,0 +1,10 @@
+[Unit]
+Description=Export new X bookmarks into the vault
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/x-bookmark-exporter
+ExecStart=/usr/bin/python3 -u -m x_bookmarks watch --once --vault ${X_BOOKMARK_VAULT}
+EnvironmentFile=-%h/.config/x-bookmark-exporter/service.env
+TimeoutStartSec=infinity
+UMask=0077

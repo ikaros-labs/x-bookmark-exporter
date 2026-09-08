@@ -1,0 +1,7 @@
+include AGENTS.md CONTRIBUTING.md SECURITY.md
+include x-bookmarks.service x-bookmarks.timer service.env.example
+recursive-include tests *.py
+prune test-vault
+prune exports
+prune vault
+global-exclude __pycache__ *.py[cod] credentials*.json service.env

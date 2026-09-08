@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "x-bookmark-exporter"
+version = "0.1.0"
+description = "Export X bookmarks and media into an Obsidian vault"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "ikaros-labs"}]
+requires-python = ">=3.11"
+dependencies = []
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Operating System :: POSIX",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Utilities",
+]
+
+[project.urls]
+Homepage = "https://github.com/ikaros-labs/x-bookmark-exporter"
+Issues = "https://github.com/ikaros-labs/x-bookmark-exporter/issues"
+
+[project.scripts]
+x-bookmarks = "x_bookmarks.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["x_bookmarks*"]

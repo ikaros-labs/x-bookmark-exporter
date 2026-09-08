@@ -1,0 +1,11 @@
+[Unit]
+Description=Check X bookmarks every five minutes
+
+[Timer]
+OnStartupSec=30s
+OnUnitInactiveSec=5min
+AccuracySec=10s
+Unit=x-bookmarks.service
+
+[Install]
+WantedBy=timers.target
