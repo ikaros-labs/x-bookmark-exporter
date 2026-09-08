@@ -1,5 +1,6 @@
 include AGENTS.md CONTRIBUTING.md SECURITY.md
-include x-bookmarks.service x-bookmarks.timer service.env.example
+include .env.example
+recursive-include examples/systemd *.service *.timer
 recursive-include tests *.py
 prune test-vault
 prune exports

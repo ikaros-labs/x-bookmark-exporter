@@ -167,7 +167,7 @@ first-seen timestamps persist in `.x-bookmarks/monitor-USER_ID.json`. To reset a
 deferred entry, stop monitoring and remove its entry from this file.
 The regular `export` command ignores monitor retry schedules for manual retries.
 
-On Linux, the supplied user service/timer runs a cycle every five minutes without
+On Linux, the templates in [`examples/systemd/`](examples/systemd/) run a cycle every five minutes without
 overlap, with logs in the journal. The example expects the checkout at
 `~/x-bookmark-exporter` and Python 3.11+ at `/usr/bin/python3`; adjust
 `WorkingDirectory` and `ExecStart` if needed. Configure your destination using
@@ -177,10 +177,10 @@ subdirectory. Changing directories does not move existing exports or their state
 ```sh
 mkdir -p ~/.config/systemd/user ~/.config/x-bookmark-exporter
 # For a new configuration only; preserve any existing local secrets/settings.
-cp -n service.env.example ~/.config/x-bookmark-exporter/service.env
+cp -n .env.example ~/.config/x-bookmark-exporter/service.env
 chmod 600 ~/.config/x-bookmark-exporter/service.env
 # Edit service.env and set X_BOOKMARK_VAULT to your real absolute vault path.
-cp x-bookmarks.service x-bookmarks.timer ~/.config/systemd/user/
+cp examples/systemd/x-bookmarks.service examples/systemd/x-bookmarks.timer ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now x-bookmarks.timer
 systemctl --user start --no-block x-bookmarks.service
