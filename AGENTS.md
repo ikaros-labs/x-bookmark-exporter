@@ -2,6 +2,9 @@
 
 ## Project
 
+Always use **Nikita Melnikov** as the copyright holder in licenses and copyright
+notices, rather than the GitHub organization name.
+
 Python 3.11+ CLI, Linux/macOS, standard library only at runtime. The `x_bookmarks`
 package owns OAuth, API reads, Markdown/media export, migrations, and polling.
 The Linux systemd examples are optional; foreground commands work on macOS too.
