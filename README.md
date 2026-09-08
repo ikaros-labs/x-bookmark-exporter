@@ -7,9 +7,9 @@ X Articles include their full API-provided text and available media. Threads and
 quoted posts are linked, not fetched. No LLM, scraping, or runtime dependencies.
 
 **By default, successfully exported bookmarks are removed from X.** Start with
-`--keep-bookmarks` to inspect the output. Article export is best-effort: a missing
-body or image produces a clearly marked partial note that is still eligible for
-bookmark removal. Ordinary posts require all requested content/media to succeed.
+`--keep-bookmarks` to inspect the output. All exports are best-effort: missing text,
+polls, images, or playable video produce a clearly marked partial note that is still
+eligible for bookmark removal. The source link and post ID are always preserved.
 
 Python 3.11+ is required. Linux and macOS are supported; Windows is not currently
 supported because process locking uses `fcntl`. X developer access, OAuth consent,
@@ -113,9 +113,10 @@ The CLI collects the inventory before any deletion, downloads media, writes a re
 and Markdown atomically, checks SHA-256 hashes, then removes the bookmark. Re-running
 reuses verified exports and retries removal. A process lock prevents overlapping runs.
 Rate limits wait automatically; interrupt with Ctrl-C and rerun the same command.
-Transient API server errors retry up to three times. Ordinary-post network/download failures retain
-the bookmark and can be retried by rerunning. Article failures save a marked partial
-note instead. The manual `export` command exits with code 1 if any item fails.
+Transient API server errors retry up to three times. Unavailable content or failed
+media downloads are skipped, with omissions recorded in a marked partial note.
+Saved files must still pass verification before bookmark removal. Filesystem errors,
+modified notes, and removal failures remain retryable errors. The manual `export` command exits with code 1 if any item fails.
 An existing untracked note or an edited/missing tracked file blocks removal rather
 than overwriting your content. Restore the original files to retry automatic removal.
 
@@ -182,16 +183,18 @@ from the body. Rich typography and original media placement are not reconstructe
 frontmatter records `content_type: x_article`, `article_format: plain_text`, and
 `media_layout: appended`. The raw API response is saved alongside export records.
 A preview-only Article is never treated as a complete export. If body or media
-retrieval fails, Articles save available content plus the source link, post ID,
+retrieval fails, all posts save available content plus the source link, post ID,
 author and title, with `export_status: partial` and `export_warnings` explaining
-omissions. A failed refresh of a known Article falls back to cached data. These
+omissions. Failed content lookups during monitoring fall back to cached or discovered
+post metadata (except authentication/billing errors, which stop the cycle). These
 best-effort exports are eligible for bookmark removal once saved files are verified.
-Ordinary posts still retain bookmarks when required content or media fails.
 Previously parked unsupported Articles automatically become eligible on the next poll.
 
 - Only posts X makes accessible are exportable; historical completeness is not guaranteed.
-- API partial errors abort inventory collection before deletion.
-- Ordinary posts with missing media or unavailable MP4 variants retain their bookmarks.
+- Partial API responses with usable posts export those posts with warnings. An
+  error-only inventory response aborts collection before any deletion.
+- Missing media or unavailable MP4 variants are skipped for both posts and Articles;
+  verified partial exports are eligible for bookmark removal.
 - Thread replies, quoted-post media, external articles, and live streams are not archived.
 - The default request vocabulary is `tweet.fields` / `note_tweet`. X's current docs
   also show `post.fields` / `note_post`; if the API rejects the former, retry with

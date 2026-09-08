@@ -32,9 +32,9 @@ OAuth, migrations, or removal behavior need focused regression tests.
 
 - Inventory pagination finishes before removals start; old post IDs may be newly bookmarked.
 - Verify saved note/media/raw files before unbookmarking. Preserve edited user notes.
-- Article export is intentionally best-effort: missing body/media produce a marked
-  partial export with source URL and ID; verified partial Articles may be unbookmarked.
-- Ordinary posts retain bookmarks when required content/media cannot be saved.
+- All exports are intentionally best-effort: missing text, polls, or media produce
+  a marked partial export with source URL and ID; verified partial notes may be unbookmarked.
+- Filesystem failures, modified notes, and failed verification still block removal.
 - Receipt/state migrations must be restartable and keep file hashes consistent.
 - Polling persists first-seen timestamps and retry backoff and avoids unnecessary
   expanded reads. Keep manual export usable independently of the monitor.

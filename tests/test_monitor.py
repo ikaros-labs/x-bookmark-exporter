@@ -61,8 +61,11 @@ class MonitorTests(unittest.TestCase):
     def test_forbidden_post_does_not_block_other_posts(self):
         self.client.inventory.return_value = {'122': {}, '123': {}}
         self.client.lookup.side_effect = [APIError(403), self.client.lookup.return_value]
-        self.assertEqual(poll(self.client, self.output), 1)
-        self.client.remove.assert_called_once_with('9', '123')
+        self.assertEqual(poll(self.client, self.output), 0)
+        self.assertEqual(self.client.remove.call_count, 2)
+        raw = json.loads((self.internal / 'raw/122.json').read_text())
+        self.assertEqual(raw['post']['id'], '122')
+        self.assertTrue(raw['export_warnings'])
 
     def test_account_id_cached(self):
         client = Client.__new__(Client)
@@ -72,6 +75,21 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(client.user_id(), '9')
         self.assertEqual(client.user_id(), '9')
         client.request.assert_called_once()
+
+    def test_authentication_failure_does_not_export_or_remove(self):
+        self.client.lookup.side_effect = APIError(401)
+        with self.assertRaises(APIError):
+            poll(self.client, self.output)
+        self.client.remove.assert_not_called()
+        self.assertFalse(list(self.output.glob('*.md')))
+
+    def test_lookup_preserves_available_data_on_partial_errors(self):
+        client = Client.__new__(Client)
+        client.request = Mock(return_value={'data': {'id': '123', 'text': 'Available'},
+                                           'errors': [{'title': 'Missing media'}]})
+        item = client.lookup('123')
+        self.assertEqual(item['post']['text'], 'Available')
+        self.assertTrue(item['export_warnings'])
 
     def test_discovery_has_no_expansions(self):
         client = Client.__new__(Client)

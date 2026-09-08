@@ -46,12 +46,11 @@ def poll(client, output, vocabulary="tweet", keep=False):
                 try:
                     item = client.lookup(post_id, vocabulary)
                 except (OSError, ValueError, RuntimeError) as error:
-                    cached = previous.get(post_id, {})
-                    if not cached.get("post", {}).get("article") or (
-                        isinstance(error, APIError) and error.status in {401, 402}
-                    ):
+                    if isinstance(error, APIError) and error.status in {401, 402}:
                         raise
-                    item = dict(cached, export_warnings=["Article refresh failed; saved available cached data"])
+                    cached = previous.get(post_id) or current[post_id]
+                    cached = cached or {"post": {"id": post_id}, "includes": {}}
+                    item = dict(cached, export_warnings=["Post lookup failed; saved available metadata/content"])
                 item["first_seen_at"] = entry["first_seen_at"]
                 previous[post_id] = item
                 write_json(inventory_path, previous)

@@ -42,20 +42,23 @@ class ExportTests(unittest.TestCase):
         self.assertEqual(process(self.client, "9", {"123": ITEM}, self.output, state, self.state_path), 0)
         self.assertEqual(original, (self.output / filename(ITEM)).read_bytes())
 
-    def test_missing_media_never_removes(self):
+    def test_missing_media_saves_partial_and_removes(self):
         item = copy.deepcopy(ITEM)
         item["post"]["attachments"] = {"media_keys": ["missing"]}
-        self.assertEqual(process(self.client, "9", {"123": item}, self.output, {}, self.state_path), 1)
-        self.client.remove.assert_not_called()
-        self.assertFalse((self.output / filename(ITEM)).exists())
+        self.assertEqual(process(self.client, "9", {"123": item}, self.output, {}, self.state_path), 0)
+        self.client.remove.assert_called_once()
+        text = (self.output / filename(ITEM)).read_text()
+        self.assertIn('export_status: "partial"', text)
+        self.assertIn('Full long text', text)
+        self.assertNotIn('![[', text)
 
-    def test_download_failure_never_removes(self):
+    def test_download_failure_saves_partial_and_removes(self):
         item = copy.deepcopy(ITEM)
         item["post"]["attachments"] = {"media_keys": ["m"]}
         item["includes"]["media"] = [{"media_key": "m", "type": "photo", "url": "https://example.com/m.jpg"}]
         with patch("x_bookmarks.export.download", side_effect=OSError("network failure")):
-            self.assertEqual(process(self.client, "9", {"123": item}, self.output, {}, self.state_path), 1)
-        self.client.remove.assert_not_called()
+            self.assertEqual(process(self.client, "9", {"123": item}, self.output, {}, self.state_path), 0)
+        self.client.remove.assert_called_once()
 
     def test_media_saved_and_embedded_before_removal(self):
         item = copy.deepcopy(ITEM)
@@ -90,6 +93,36 @@ class ExportTests(unittest.TestCase):
             {"content_type": "video/mp4", "bit_rate": 10, "url": "low"},
             {"content_type": "video/mp4", "bit_rate": 20, "url": "high"}]}), ("high", ".mp4"))
 
+    def test_unplayable_video_does_not_skip_later_photo(self):
+        item = copy.deepcopy(ITEM)
+        item['post']['attachments'] = {'media_keys': ['video', 'photo']}
+        item['includes']['media'] = [
+            {'media_key': 'video', 'type': 'video', 'variants': []},
+            {'media_key': 'photo', 'type': 'photo', 'url': 'https://example.com/image.jpg'}]
+        def save(url, path):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b'image')
+        with patch('x_bookmarks.export.download', side_effect=save):
+            self.assertEqual(process(self.client, '9', {'123': item}, self.output, {}, self.state_path), 0)
+        text = (self.output / filename(item)).read_text()
+        self.assertIn('![[assets/123/2.jpg]]', text)
+        self.assertIn('Media video unavailable', text)
+        self.client.remove.assert_called_once()
+
+    def test_metadata_only_export_for_missing_text_and_poll(self):
+        item = {'post': {'id': '123', 'attachments': {'poll_ids': ['p']}}, 'includes': {}}
+        self.assertEqual(process(self.client, '9', {'123': item}, self.output, {}, self.state_path), 0)
+        text = (self.output / filename(item)).read_text()
+        self.assertIn('https://x.com/i/status/123', text)
+        self.assertIn('Post text unavailable', text)
+        self.assertIn('Poll p unavailable', text)
+        self.client.remove.assert_called_once()
+
+    def test_note_write_failure_still_prevents_removal(self):
+        with patch('x_bookmarks.export.atomic_write', side_effect=OSError('Disk full')):
+            self.assertEqual(process(self.client, '9', {'123': ITEM}, self.output, {}, self.state_path), 1)
+        self.client.remove.assert_not_called()
+
     def test_pagination_and_partial_errors(self):
         client = Client.__new__(Client)
         client.request = Mock(side_effect=[{"data": [ITEM["post"]], "meta": {"next_token": "next"}},
@@ -97,6 +130,8 @@ class ExportTests(unittest.TestCase):
         self.assertEqual(set(client.inventory("9")), {"123", "124"})
         self.assertEqual(client.request.call_count, 2)
         client.request = Mock(return_value={"data": [ITEM["post"]], "errors": [{"title": "Unavailable"}]})
+        self.assertIn('export_warnings', client.inventory("9")['123'])
+        client.request.return_value = {"errors": [{"title": "Unavailable"}]}
         with self.assertRaises(RuntimeError):
             client.inventory("9")
 

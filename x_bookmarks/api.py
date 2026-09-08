@@ -84,11 +84,11 @@ class Client:
 
     def lookup(self, post_id, vocabulary="tweet"):
         result = self.request("GET", f"/tweets/{post_id}", content_fields(vocabulary))
-        if not result.get("data") or (result.get("errors") and not result["data"].get("article")):
+        if not result.get("data"):
             raise RuntimeError("Post lookup incomplete; bookmark retained")
         item = {"post": result["data"], "includes": result.get("includes", {})}
         if result.get("errors"):
-            item["export_warnings"] = ["API returned partial article data"]
+            item["export_warnings"] = ["API returned partial post data"]
         return item
 
     def refresh(self):
@@ -142,11 +142,13 @@ class Client:
         seen = set()
         while True:
             page = self.request("GET", f"/users/{user_id}/bookmarks", params)
-            if page.get("errors"):
+            if page.get("errors") and not page.get("data"):
                 raise RuntimeError("Bookmark API returned partial errors; inventory not committed. No bookmarks removed.")
             includes = page.get("includes", {})
             for post in page.get("data", []):
                 items[post["id"]] = {"post": post, "includes": includes}
+                if page.get("errors"):
+                    items[post["id"]]["export_warnings"] = ["Bookmark API returned partial data on this page"]
                 if limit and len(items) >= limit:
                     return items
             token = page.get("meta", {}).get("next_token")

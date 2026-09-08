@@ -20,7 +20,7 @@ def digest(path):
 
 
 def media_source(media):
-    if media["type"] == "photo" and media.get("url"):
+    if media.get("type") == "photo" and media.get("url"):
         url = media["url"]
         suffix = Path(urllib.parse.urlsplit(url).path).suffix.lower()
         return url, suffix if suffix in {".jpg", ".jpeg", ".png", ".webp", ".gif"} else ".jpg"
@@ -28,7 +28,7 @@ def media_source(media):
     if videos:
         best = max(videos, key=lambda v: v.get("bit_rate", v.get("bitrate", 0)))
         return best["url"], ".mp4"
-    raise ValueError("Media has no downloadable photo or MP4; bookmark retained")
+    raise ValueError("Media has no downloadable photo or MP4")
 
 
 def download(url, path):
@@ -77,7 +77,7 @@ def render(item, media_links):
         except ValueError:
             text = "Article body unavailable. Follow the original post link to read it on X."
     if not isinstance(text, str) or not text:
-        raise ValueError("Post text missing; bookmark retained")
+        text = "Post text unavailable. Follow the original post link to read it on X."
     for entity in full.get("entities", {}).get("urls", []):
         if entity.get("url"):
             text = text.replace(entity["url"], entity.get("unwound_url") or entity.get("expanded_url") or entity["url"])
@@ -92,13 +92,13 @@ def render(item, media_links):
     if article:
         metadata.update(content_type="x_article", article_title=article.get("title"),
                         article_format="plain_text", media_layout="appended", export_status="complete")
-        if item.get("export_warnings"):
-            metadata.update(export_status="partial", export_warnings=item["export_warnings"])
+    if item.get("export_warnings"):
+        metadata.update(export_status="partial", export_warnings=item["export_warnings"])
     # JSON values are valid YAML values and safely quote IDs and arbitrary metadata.
     frontmatter = "\n".join(f"{key}: {json.dumps(value, ensure_ascii=False)}" for key, value in metadata.items())
     body = f"---\n{frontmatter}\n---\n\n[Original post]({url})\n\n{html.unescape(text)}\n"
     if item.get("export_warnings"):
-        body += "\n> Partial article export. Some content was unavailable; see export_warnings in the frontmatter.\n"
+        body += "\n> Partial export. Some content was unavailable; see export_warnings in the frontmatter.\n"
     for relative, alt in media_links:
         body += f"\n![[{relative}]]\n"
         if alt:
@@ -106,7 +106,7 @@ def render(item, media_links):
     polls = {p["id"]: p for p in item["includes"].get("polls", [])}
     for poll_id in post.get("attachments", {}).get("poll_ids", []):
         if poll_id not in polls:
-            raise ValueError("Missing poll data; bookmark retained")
+            continue
         body += "\nPoll:\n\n" + "\n".join(f"- {o['label']}: {o.get('votes', 0)} votes" for o in polls[poll_id]["options"]) + "\n"
     refs = post.get("referenced_tweets", post.get("referenced_posts", []))
     for ref in refs:
@@ -131,15 +131,21 @@ def archive(item, output):
             article_text(article)
         except ValueError:
             warnings.append("Article body unavailable; saved metadata and source link")
+    else:
+        full = post.get("note_tweet") or post.get("note_post") or post
+        if not isinstance(full.get("text"), str) or not full["text"]:
+            warnings.append("Post text unavailable; saved metadata and source link")
+    polls = {p["id"] for p in item["includes"].get("polls", [])}
+    for poll_id in post.get("attachments", {}).get("poll_ids", []):
+        if poll_id not in polls:
+            warnings.append(f"Poll {poll_id} unavailable")
     media = {m["media_key"]: m for m in item["includes"].get("media", [])}
     links, files = [], []
     try:
         keys = media_keys(post)
     except ValueError:
-        if not article:
-            raise
         keys = []
-        warnings.append("Article media references unavailable")
+        warnings.append("Media references unavailable")
     for index, key in enumerate(keys, 1):
         try:
             if key not in media:
@@ -150,15 +156,12 @@ def archive(item, output):
             files.append(relative)
             links.append((relative, media[key].get("alt_text", "")))
         except (OSError, ValueError) as error:
-            if not article:
-                raise
             warnings.append(f"Media {key} unavailable: {error}")
-    if article:
-        item = dict(item, export_warnings=warnings)
+    item = dict(item, export_warnings=warnings)
     relative = filename(item)
     if (output / relative).exists():
         raise ValueError(f"Untracked note already exists: {relative}; refusing to overwrite")
-    # Render before publishing the note, so incomplete posts never become completed exports.
+    # Publish the note only after all available content and omissions are accounted for.
     body = render(item, links)
     raw = f".x-bookmarks/raw/{post_id}.json"
     write_json(output / raw, item)
