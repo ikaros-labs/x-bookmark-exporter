@@ -1,0 +1,16 @@
+{
+  "replace": false,
+  "topics": {
+    "reading": {
+      "strong": ["essay", "longread", "лонгрид"],
+      "weak": ["book", "blog"],
+      "authors": ["paulg"]
+    },
+    "3d-printing": {
+      "strong": ["voron", "klipper"]
+    },
+    "eink": {
+      "boost": 2.0
+    }
+  }
+}

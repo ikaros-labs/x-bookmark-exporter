@@ -11,6 +11,9 @@ quoted posts are linked, not fetched. No LLM, scraping, or runtime dependencies.
 polls, images, or playable video produce a clearly marked partial note that is still
 eligible for bookmark removal. The source link and post ID are always preserved.
 
+An offline `triage` command sorts the exported inbox into topic folders through a
+reviewable plan, with an optional keyboard web UI. See [Triage the inbox](#triage-the-inbox-offline).
+
 Python 3.11+ is required. Linux and macOS are supported; Windows is not currently
 supported because process locking uses `fcntl`. X developer access, OAuth consent,
 and API credits are required. This project is not affiliated with X or Obsidian.
@@ -198,6 +201,122 @@ systemctl --user stop x-bookmarks.service
 
 User timers run while the user service manager is active. To keep them running after
 logout/start them at boot, enable user lingering with `loginctl enable-linger`.
+
+## Triage the inbox (offline)
+
+Exported notes pile up in one folder. `triage` proposes where each one should go and
+writes a plan for you to review. It needs no credentials and makes no network calls,
+and it never writes into the vault: plans live outside it, and `--apply` only changes a
+copy.
+
+```sh
+# 1. Propose a plan (default inbox: X/inbox; default plan: ./triage-plan.md).
+x-bookmarks triage --vault ~/Obsidian --inbox "3. Resources/X/inbox" --plan out/triage-plan.md
+
+# 2. Review it: edit out/triage-plan.md in any editor, or use the keyboard UI.
+x-bookmarks triage-ui --vault ~/Obsidian --plan out/triage-plan.md   # http://localhost:8724
+
+# 3. Execute it on a copy. The notes folder (the inbox's parent) is copied into
+#    the target at the same vault-relative path, and notes are moved there.
+x-bookmarks triage --vault ~/Obsidian --plan out/triage-plan.md --apply --target out/vault-copy
+```
+
+The steps above produce the following on a 179-note inbox:
+
+```text
+Triage plan for 179 notes in 3. Resources/X/inbox:
+  ai                 60  new
+  dev                23  new
+  electronics        12  new
+  3d-printing        11  new
+  eink                7  existing
+  startups            5  new
+  learning            4  new
+  health              3  new
+  productivity        2  new
+  keep               39
+  delete             13
+```
+
+A plan entry looks like this. The action word is the part you edit.
+
+```markdown
+- [x] eink ← [[2026-09-08 - ryanlpeterman - Used Fable 5.1 to turn my Kindle into a Linux terminal so I could - 2097406401068896283]]
+  - @ryanlpeterman · “Used Fable 5.1 to turn my Kindle into a Linux terminal…” · 1 media · why: kindle
+```
+
+**Actions.** Each entry's action is one of:
+- a folder name, created as a sibling of the inbox. Put names that contain spaces in backticks.
+- `delete`, which moves the note to `_delete/` in the copy. Nothing is ever unlinked.
+- `keep`, which leaves the note in the inbox.
+
+Untick `[x]` to skip an entry.
+
+**Classification.** Each note is scored against keyword rules: a strong keyword scores 3 and
+a weak one scores 1. Weak keywords alone never move a note. A note whose author is already
+filed in an existing sibling folder (for example `eink/`) gets +4 for that folder. Niche
+topics carry a boost, so a "Kindle" note goes to `eink`, not `dev`. Notes scoring below 3
+are marked `keep`.
+
+`--tfidf` also proposes a folder for unmatched notes by cosine similarity to each folder's
+notes (`--tfidf-min`, default 0.2). These proposals are unticked, because TF-IDF on short
+posts is noisy.
+
+**Deletes.**
+- Duplicates and posts whose text is unavailable are proposed as ticked deletes.
+- Low-content posts are proposed as unticked deletes. These are media-only posts, posts
+  with almost no text, and short replies. You confirm them.
+- Dead external links are not checked, because triage makes no network calls.
+
+**Custom rules.** Add topics or keywords with `--rules my-rules.json` (see
+`examples/triage-rules.example.json`):
+- A trailing `*` matches a prefix, which helps with inflected Russian words.
+- `"replace": true` drops the built-in rules.
+
+**UI keys.**
+
+| Key | Action |
+| --- | --- |
+| `j` / `k` | Move down / up |
+| `1`–`0` | File into a folder: existing folders first, then by plan count |
+| `d` | Delete |
+| `i` | Keep in inbox |
+| `x` / space | Tick or untick |
+| `n` | New folder |
+| `o` | Open the post on X |
+
+Press `?` in the UI for this list. The header shows a one-line summary and filter chips with
+counts. On a phone, tapping a note opens it in a bottom sheet with tap targets for every folder,
+so triage works without a keyboard. The detail pane shows the post's text, media and outbound
+links.
+
+Every keypress or tap rewrites the plan file atomically.
+
+**UI network exposure.** The UI binds `100.66.44.47` (a tailscale address) by default. Set
+`--host` or `X_BOOKMARK_TRIAGE_HOST` to change it, for example `--host 127.0.0.1`. Avoid
+`0.0.0.0` on a machine with a public IP. The UI:
+- answers only requests whose `Host` is the bound address or loopback;
+- accepts writes only as `application/json` POSTs carrying a same-origin `Origin` header (a
+  missing or foreign `Origin` gets 403, which blocks CSRF from any web page you open);
+- returns generic errors without paths or tracebacks;
+- reads notes and media from the vault read-only, and only from inside the plan's notes folder.
+
+**After applying.** Moved notes keep their content unchanged:
+- Wikilink embeds resolve vault-wide.
+- `../assets` links still work, because topic folders sit next to the inbox.
+- Export receipts stay in `inbox/.x-bookmarks/`.
+
+Each apply writes a `triage-applied-*.json` log to the copy. Re-running an apply skips
+notes that were already moved and never overwrites an existing file.
+
+**Apply safety.** `--apply` only ever modifies a copy that it created itself:
+- On the first run it copies the notes folder and writes a `.x-bookmarks-triage-copy` marker
+  into the copy. Later runs reuse a copy only if that marker is present.
+- It refuses a `--target` that is inside the vault or inside any directory with `.obsidian/`,
+  and refuses copies that contain `.obsidian/`.
+- It refuses a symlinked inbox and skips symlinked notes or topic folders.
+- Every source and destination must resolve inside the copy and outside `--vault`. This
+  holds even when `--vault` points at the wrong place.
 
 ## API limitations
 
