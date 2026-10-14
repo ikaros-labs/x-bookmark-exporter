@@ -11,6 +11,8 @@ from .storage import write_json
 from .migration import migrate
 from .monitor import watch
 from .paths import assets_directory
+from .triage import run_triage
+from .triage_web import serve
 
 
 def main():
@@ -37,10 +39,38 @@ def main():
     monitor.add_argument("--once", action="store_true", help="Run one polling cycle, for service timers")
     monitor.add_argument("--keep-bookmarks", action="store_true")
     monitor.add_argument("--api-vocabulary", choices=["tweet", "post"], default="tweet")
+    triage = commands.add_parser("triage", help="Offline: plan sorting of exported notes into topic folders; apply on a copy")
+    triage.add_argument("--vault", required=True, type=Path, help="Vault to read (never modified)")
+    triage.add_argument("--inbox", default="X/inbox", help="Inbox folder relative to the vault (default: X/inbox)")
+    triage.add_argument("--plan", type=Path, default=Path("triage-plan.md"),
+                        help="Plan file outside the vault (default: ./triage-plan.md)")
+    triage.add_argument("--rules", type=Path, help="JSON file adding or replacing topic keyword/author rules")
+    triage.add_argument("--tfidf", action="store_true", help="Also file unmatched notes by local TF-IDF similarity")
+    triage.add_argument("--tfidf-min", type=float, default=0.2, help="Minimum cosine similarity (default: 0.2)")
+    triage.add_argument("--apply", action="store_true", help="Execute the plan on a copy instead of writing a plan")
+    triage.add_argument("--target", type=Path, help="Copy directory outside the vault, required with --apply")
+    triage_ui = commands.add_parser("triage-ui", help="Local web UI for reviewing a triage plan")
+    triage_ui.add_argument("--vault", required=True, type=Path, help="Vault to read (never modified)")
+    triage_ui.add_argument("--plan", type=Path, default=Path("triage-plan.md"))
+    triage_ui.add_argument("--host", default=os.environ.get("X_BOOKMARK_TRIAGE_HOST", "100.66.44.47"),
+                           help="Bind address (default: 100.66.44.47, the tailscale IP; also X_BOOKMARK_TRIAGE_HOST)")
+    triage_ui.add_argument("--port", type=int, default=8724)
     for command in (export, monitor):
         command.add_argument("--assets-folder", default=os.environ.get("X_BOOKMARK_ASSETS_FOLDER"),
                              help="Media folder relative to vault root (default: assets inside the notes folder); also X_BOOKMARK_ASSETS_FOLDER")
     args = parser.parse_args()
+    if args.command in ("triage", "triage-ui"):
+        # Offline commands: no credentials, locks, or API access.
+        try:
+            if args.command == "triage":
+                run_triage(args)
+            else:
+                serve(args.vault, args.plan, args.host, args.port)
+        except (OSError, ValueError) as error:
+            parser.exit(1, f"Error: {error}\n")
+        except KeyboardInterrupt:
+            parser.exit(130, "Interrupted.\n")
+        return
     args.credentials = args.credentials.expanduser().resolve()
     args.credentials.parent.mkdir(parents=True, exist_ok=True)
     lock_path = args.credentials.with_suffix(".lock")

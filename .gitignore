@@ -24,3 +24,4 @@ exports/
 .coverage
 htmlcov/
 test-vault/
+out/
