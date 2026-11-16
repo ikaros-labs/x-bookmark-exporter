@@ -1,4 +1,4 @@
-"""Where exported notes and media are saved: a local folder or obsidian-api.
+"""Where exported notes and media are saved: a local folder or Spall.
 
 Paths given to a store are relative to the notes folder, exactly as they appear in
 receipts (e.g. ``note.md`` or ``../assets/123/1.jpg``). Receipt entries under
@@ -89,10 +89,10 @@ class FileStore:
 
 
 class ApiStore:
-    """Writes through obsidian-api with a create-only token (no update or delete)."""
+    """Writes through Spall with a create-only token (no update or delete)."""
 
     retries = 3
-    rate_limit_waits = 10  # obsidian-api limits requests per account (default 120/min)
+    rate_limit_waits = 10  # Spall limits requests per account (default 120/min)
 
     def __init__(self, base_url, token, folder, data_dir, max_media_bytes=None, sleep=time.sleep, timeout=120):
         if urllib.parse.urlsplit(base_url).scheme not in {"http", "https"}:
@@ -155,11 +155,11 @@ class ApiStore:
                     self.sleep(min(max(wait, 1), 120))
                     continue
                 if error.code < 500 or attempt >= self.retries:
-                    raise StoreError(f"obsidian-api returned HTTP {error.code} for {method} "
+                    raise StoreError(f"Spall returned HTTP {error.code} for {method} "
                                      f"{self.vault_path(relative)}") from None
             except (urllib.error.URLError, http.client.HTTPException, OSError) as error:
                 if attempt >= self.retries:
-                    raise StoreError(f"obsidian-api unreachable for {method} {self.vault_path(relative)}: "
+                    raise StoreError(f"Spall unreachable for {method} {self.vault_path(relative)}: "
                                      f"{getattr(error, 'reason', error)}") from None
             finally:
                 if stream:
@@ -199,7 +199,7 @@ class ApiStore:
         return expected
 
     def verify(self, relative, expected):
-        """obsidian-api's ETag is "sha256:<first 16 hex chars>"; 304 means it matches."""
+        """Spall's ETag is "sha256:<first 16 hex chars>"; 304 means it matches."""
         tag = "sha256:" + expected[:16]
         status, headers = self.request("GET", relative, {"If-None-Match": f'"{tag}"'}, ok=(404,))
         if status == 304:

@@ -207,8 +207,9 @@ Every `export` and `watch` run needs exactly one destination:
   directly into a local vault folder. State lives in `<folder>/.x-bookmarks/` unless
   `--data-dir` says otherwise. Media size is unlimited unless `--max-media-mb` is set.
 - `--vault-api URL` (**API mode**): notes and media are created through
-  [obsidian-api](https://github.com/ikaros-labs/obsidian-api) (`PUT /v1/files/...` with
-  `If-None-Match: *`). The token comes from `X_VAULT_API_TOKEN`; the URL can also come
+  [Spall](https://spall.nikmel.xyz) ([source](https://github.com/ikaros-labs/spall)),
+  a scoped REST API for Obsidian vaults, using `PUT /v1/files/...` with
+  `If-None-Match: *`. The token comes from `X_VAULT_API_TOKEN`; the URL can also come
   from `X_VAULT_API_URL`. The API never overwrites: an existing file with different
   content is an error and the bookmark is kept. Files are verified through the API's
   SHA-256 ETag before a bookmark is removed.
@@ -223,13 +224,13 @@ python3 -m x_bookmarks watch --vault-api http://127.0.0.1:8787 \
 In API mode:
 
 - `--data-dir` (or `X_BOOKMARK_DATA_DIR`) is **required**. It holds the state, monitor
-  queue, inventory, receipts, raw JSON and lock. obsidian-api hides dotfiles, so none
+  queue, inventory, receipts, raw JSON and lock. Spall hides dotfiles, so none
   of this goes into the vault.
 - `--folder` and `--assets-folder` are vault paths, exactly as in file mode (the
   token's account should have no `root`). Both also read `X_BOOKMARK_FOLDER` and
   `X_BOOKMARK_ASSETS_FOLDER`.
 - Media larger than `--max-media-mb` (`X_BOOKMARK_MAX_MEDIA_MB`, **default 10**, matching
-  obsidian-api's default 10 MiB body limit) is skipped. The note is saved as a partial
+  Spall's default 10 MiB body limit) is skipped. The note is saved as a partial
   export with a warning naming the media URL; the original post link is always in the
   note. The size is checked from `Content-Length` before downloading, and a download
   stops as soon as it passes the limit.
@@ -265,8 +266,8 @@ mode as a non-root user (UID 10001). There is no HTTP port.
 
 | Variable | |
 |---|---|
-| `X_VAULT_API_URL` | obsidian-api base URL (required) |
-| `X_VAULT_API_TOKEN` | obsidian-api token with `[read, create]` on the folders below (required) |
+| `X_VAULT_API_URL` | Spall base URL (required) |
+| `X_VAULT_API_TOKEN` | Spall token with `[read, create]` on the folders below (required) |
 | `X_CLIENT_ID` | your X developer app's client ID (required for login) |
 | `X_CLIENT_SECRET` | only for confidential OAuth clients |
 | `X_BOOKMARK_FOLDER` | notes folder, default `3. Resources/X/inbox` |
@@ -276,7 +277,7 @@ mode as a non-root user (UID 10001). There is no HTTP port.
 
 ```sh
 docker run -d --name x-bookmarks --restart unless-stopped \
-  -e X_VAULT_API_URL=http://obsidian-api-host:8787 -e X_VAULT_API_TOKEN=vlt_... \
+  -e X_VAULT_API_URL=http://spall-host:8787 -e X_VAULT_API_TOKEN=vlt_... \
   -e X_CLIENT_ID=... -v x-bookmarks-data:/data \
   ghcr.io/ikaros-labs/x-bookmark-exporter:latest
 # One-time login: open the printed URL, then paste the redirected URL.

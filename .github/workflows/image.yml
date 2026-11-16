@@ -52,11 +52,11 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.description=Export X bookmarks and media into an Obsidian vault (files or obsidian-api)
+            org.opencontainers.image.description=Export X bookmarks and media into an Obsidian vault (files or Spall)
             org.opencontainers.image.licenses=MIT
           annotations: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.description=Export X bookmarks and media into an Obsidian vault (files or obsidian-api)
+            org.opencontainers.image.description=Export X bookmarks and media into an Obsidian vault (files or Spall)
             org.opencontainers.image.licenses=MIT
       - uses: docker/build-push-action@v6
         with:
