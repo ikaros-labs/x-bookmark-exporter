@@ -1,4 +1,4 @@
-# x-bookmark-exporter in API mode: writes notes and media through Spall.
+# x2vault in API mode: writes notes and media through Spall.
 # Keep secrets in a .env file next to this one (never commit it):
 #   X_VAULT_API_URL=http://spall-host:8787
 #   X_VAULT_API_TOKEN=vlt_...      # account with [read, create] on "3. Resources/X"
@@ -6,10 +6,10 @@
 #   X_CLIENT_SECRET=...            # only for confidential clients
 # First start, then log in once (paste the redirected URL when asked):
 #   docker compose up -d
-#   docker compose exec x-bookmarks python -m x_bookmarks --credentials /data/credentials.json login
+#   docker compose exec x2vault python -m x2vault --credentials /data/credentials.json login
 services:
-  x-bookmarks:
-    image: ghcr.io/ikaros-labs/x-bookmark-exporter:latest
+  x2vault:
+    image: ghcr.io/ikaros-labs/x2vault:latest
     restart: unless-stopped
     environment:
       X_VAULT_API_URL: ${X_VAULT_API_URL}

@@ -5,7 +5,7 @@ Description=Check X bookmarks every five minutes
 OnStartupSec=30s
 OnUnitInactiveSec=5min
 AccuracySec=10s
-Unit=x-bookmarks.service
+Unit=x2vault.service
 
 [Install]
 WantedBy=timers.target

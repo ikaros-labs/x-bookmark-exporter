@@ -36,9 +36,19 @@ def add_target(command, api=True):
                               "mode; required in API mode); also X_BOOKMARK_DATA_DIR")
 
 
+def default_credentials():
+    config = Path.home() / ".config"
+    current, old = config / "x2vault/credentials.json", config / "x-bookmark-exporter/credentials.json"
+    if not current.exists() and old.exists():
+        print(f"Using old credentials at {old}; move them to {current}.", flush=True)
+        return old
+    return current
+
+
 def main():
     parser = argparse.ArgumentParser(description="Export individual X bookmarks and media to Markdown")
-    parser.add_argument("--credentials", type=Path, default=Path.home() / ".config/x-bookmark-exporter/credentials.json")
+    parser.add_argument("--credentials", type=Path,
+                        help="OAuth credentials file (default: ~/.config/x2vault/credentials.json)")
     commands = parser.add_subparsers(dest="command", required=True)
     auth = commands.add_parser("login", help="Authorize your own X developer app")
     auth.add_argument("--client-id", default=os.environ.get("X_CLIENT_ID"))
@@ -64,6 +74,8 @@ def main():
                              help="Skip larger media with a partial-note warning (default: 10 in API mode, "
                                   "unlimited in file mode); also X_BOOKMARK_MAX_MEDIA_MB")
     args = parser.parse_args()
+    if args.credentials is None:
+        args.credentials = default_credentials()
     args.credentials = args.credentials.expanduser().resolve()
     args.credentials.parent.mkdir(parents=True, exist_ok=True)
     lock_path = args.credentials.with_suffix(".lock")

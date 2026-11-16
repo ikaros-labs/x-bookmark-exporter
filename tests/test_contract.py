@@ -23,9 +23,9 @@ from email.message import Message
 from pathlib import Path
 from unittest.mock import patch
 
-from x_bookmarks import cli
-from x_bookmarks.export import verified
-from x_bookmarks.store import FileStore
+from x2vault import cli
+from x2vault.export import verified
+from x2vault.store import FileStore
 
 ENABLED = os.environ.get("XBM_API_CONTRACT") == "1"
 FOLDER, ASSETS = "3. Resources/X/inbox", "3. Resources/X/assets"
@@ -34,7 +34,7 @@ VIDEO_SIZE = 11 * 2**20
 
 
 class FakeX:
-    """Stands in for x_bookmarks.api.Client."""
+    """Stands in for x2vault.api.Client."""
 
     def __init__(self, user_id, posts):
         self.id, self.posts, self.removed, self.lookups = user_id, posts, [], []
@@ -77,7 +77,7 @@ def run(argv, client):
     def urlopen(url, timeout):
         # Media hosts are faked; Spall requests (Request objects) go to the real server.
         return FakeMedia(url) if isinstance(url, str) and url.startswith("https://media.example/") else real(url, timeout=timeout)
-    with patch.object(sys, "argv", ["x-bookmarks", *argv]), patch("x_bookmarks.cli.Client", return_value=client), \
+    with patch.object(sys, "argv", ["x2vault", *argv]), patch("x2vault.cli.Client", return_value=client), \
             patch("urllib.request.urlopen", side_effect=urlopen), \
             contextlib.redirect_stdout(log):
         try:

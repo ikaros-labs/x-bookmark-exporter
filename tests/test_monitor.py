@@ -4,9 +4,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from x_bookmarks.api import APIError, Client
-from x_bookmarks.monitor import poll
-from x_bookmarks.storage import write_json
+from x2vault.api import APIError, Client
+from x2vault.monitor import poll
+from x2vault.storage import write_json
 
 
 class MonitorTests(unittest.TestCase):

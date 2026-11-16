@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN useradd --create-home --uid 10001 xbm && mkdir /data && chown xbm:xbm /data
 WORKDIR /app
-COPY x_bookmarks ./x_bookmarks
+COPY x2vault ./x2vault
 USER xbm
 VOLUME /data
 
@@ -18,5 +18,5 @@ HEALTHCHECK --interval=1m --timeout=10s --start-period=10m \
     CMD ["python", "-c", "import glob,os,sys,time; f=glob.glob(os.path.join(os.environ['X_BOOKMARK_DATA_DIR'],'monitor-*.json')); sys.exit(0 if not os.path.exists('/data/credentials.json') or (f and time.time()-max(map(os.path.getmtime,f)) < 900) else 1)"]
 
 # API mode: set X_VAULT_API_URL, X_VAULT_API_TOKEN and X_CLIENT_ID (plus X_CLIENT_SECRET for confidential clients).
-ENTRYPOINT ["python", "-m", "x_bookmarks", "--credentials", "/data/credentials.json"]
+ENTRYPOINT ["python", "-m", "x2vault", "--credentials", "/data/credentials.json"]
 CMD ["watch", "--interval", "300"]

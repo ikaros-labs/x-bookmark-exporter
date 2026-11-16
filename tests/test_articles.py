@@ -3,9 +3,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from x_bookmarks.articles import article_text, media_keys
-from x_bookmarks.export import process, render, verified
-from x_bookmarks.naming import filename
+from x2vault.articles import article_text, media_keys
+from x2vault.export import process, render, verified
+from x2vault.naming import filename
 
 
 class ArticleTests(unittest.TestCase):
@@ -44,7 +44,7 @@ class ArticleTests(unittest.TestCase):
             path.write_bytes(b'image')
         state = {}
         client = Mock()
-        with patch('x_bookmarks.export.download', side_effect=download) as fetch:
+        with patch('x2vault.export.download', side_effect=download) as fetch:
             self.assertEqual(process(client, '9', {'123': self.item}, self.output, state, self.output/'state.json'), 0)
         self.assertEqual(fetch.call_count, 2)
         self.assertTrue(verified(self.output, state['123']['files']))
@@ -68,7 +68,7 @@ class ArticleTests(unittest.TestCase):
         def check(*args):
             self.assertTrue(verified(self.output, state['123']['files']))
         client.remove.side_effect = check
-        with patch('x_bookmarks.export.download', side_effect=OSError('403 Forbidden')):
+        with patch('x2vault.export.download', side_effect=OSError('403 Forbidden')):
             self.assertEqual(process(client, '9', {'123': self.item}, self.output, state, self.output/'state.json'), 0)
         client.remove.assert_called_once()
 

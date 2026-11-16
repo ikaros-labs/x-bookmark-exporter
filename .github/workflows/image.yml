@@ -11,7 +11,7 @@ concurrency:
   group: image-${{ github.ref }}
   cancel-in-progress: true
 env:
-  IMAGE: ghcr.io/ikaros-labs/x-bookmark-exporter
+  IMAGE: ghcr.io/ikaros-labs/x2vault
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -52,11 +52,13 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.description=Export X bookmarks and media into an Obsidian vault (files or Spall)
+            org.opencontainers.image.title=x2vault
+            org.opencontainers.image.description=x2vault: export your X bookmarks (and soon your own posts) into an Obsidian vault, as files or through Spall
             org.opencontainers.image.licenses=MIT
           annotations: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.description=Export X bookmarks and media into an Obsidian vault (files or Spall)
+            org.opencontainers.image.title=x2vault
+            org.opencontainers.image.description=x2vault: export your X bookmarks (and soon your own posts) into an Obsidian vault, as files or through Spall
             org.opencontainers.image.licenses=MIT
       - uses: docker/build-push-action@v6
         with:

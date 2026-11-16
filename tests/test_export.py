@@ -5,9 +5,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from x_bookmarks.api import Client
-from x_bookmarks.naming import filename
-from x_bookmarks.export import archive, media_source, process, render
+from x2vault.api import Client
+from x2vault.naming import filename
+from x2vault.export import archive, media_source, process, render
 
 ITEM = {"post": {"id": "123", "text": "Short", "author_id": "9",
                  "note_tweet": {"text": "Full long text https://t.co/abc", "entities": {
@@ -56,7 +56,7 @@ class ExportTests(unittest.TestCase):
         item = copy.deepcopy(ITEM)
         item["post"]["attachments"] = {"media_keys": ["m"]}
         item["includes"]["media"] = [{"media_key": "m", "type": "photo", "url": "https://example.com/m.jpg"}]
-        with patch("x_bookmarks.export.download", side_effect=OSError("network failure")):
+        with patch("x2vault.export.download", side_effect=OSError("network failure")):
             self.assertEqual(process(self.client, "9", {"123": item}, self.output, {}, self.state_path), 0)
         self.client.remove.assert_called_once()
 
@@ -71,7 +71,7 @@ class ExportTests(unittest.TestCase):
             self.assertEqual((self.output / "assets/123/1.jpg").read_bytes(), b"image fixture")
             self.assertIn("![[assets/123/1.jpg]]", (self.output / filename(ITEM)).read_text())
         self.client.remove.side_effect = check_saved
-        with patch("x_bookmarks.export.download", side_effect=save_media):
+        with patch("x2vault.export.download", side_effect=save_media):
             self.assertEqual(process(self.client, "9", {"123": item}, self.output, {}, self.state_path), 0)
         self.client.remove.assert_called_once_with("9", "123")
 
@@ -102,7 +102,7 @@ class ExportTests(unittest.TestCase):
         def save(url, path):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b'image')
-        with patch('x_bookmarks.export.download', side_effect=save):
+        with patch('x2vault.export.download', side_effect=save):
             self.assertEqual(process(self.client, '9', {'123': item}, self.output, {}, self.state_path), 0)
         text = (self.output / filename(item)).read_text()
         self.assertIn('![[assets/123/2.jpg]]', text)
@@ -119,7 +119,7 @@ class ExportTests(unittest.TestCase):
         self.client.remove.assert_called_once()
 
     def test_note_write_failure_still_prevents_removal(self):
-        with patch('x_bookmarks.export.atomic_write', side_effect=OSError('Disk full')):
+        with patch('x2vault.export.atomic_write', side_effect=OSError('Disk full')):
             self.assertEqual(process(self.client, '9', {'123': ITEM}, self.output, {}, self.state_path), 1)
         self.client.remove.assert_not_called()
 

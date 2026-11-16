@@ -9,10 +9,10 @@ from pathlib import Path, PurePosixPath
 from unittest.mock import Mock, patch
 
 from fake_vault_api import FakeVaultAPI
-from x_bookmarks.export import MediaTooLarge, archive, download, process, verified
-from x_bookmarks.monitor import poll
-from x_bookmarks.naming import filename
-from x_bookmarks.store import ApiStore, StoreError
+from x2vault.export import MediaTooLarge, archive, download, process, verified
+from x2vault.monitor import poll
+from x2vault.naming import filename
+from x2vault.store import ApiStore, StoreError
 
 FOLDER = "3. Resources/X/inbox"
 ITEM = {"post": {"id": "123", "text": "Photo post", "attachments": {"media_keys": ["m"]}},
@@ -107,7 +107,7 @@ class ApiStoreTests(unittest.TestCase):
         self.client.remove.side_effect = check_saved
         assets = PurePosixPath("/3. Resources/X/assets")
         state = {}
-        with patch("x_bookmarks.export.download", side_effect=fetch):
+        with patch("x2vault.export.download", side_effect=fetch):
             self.assertEqual(process(self.client, "9", {"123": ITEM}, self.store, state, self.data / "s.json",
                                      assets_dir=assets), 0)
         files = state["123"]["files"]
@@ -118,14 +118,14 @@ class ApiStoreTests(unittest.TestCase):
         self.assertTrue(verified(self.store, files))
         self.assertIn("![](../assets/123/1.jpg)", self.api.files[f"{FOLDER}/{filename(ITEM)}"].decode())
         # The receipt is reused: no second upload or download.
-        with patch("x_bookmarks.export.download") as again:
+        with patch("x2vault.export.download") as again:
             self.assertEqual(archive(ITEM, self.store, assets_dir=assets), files)
         again.assert_not_called()
         (self.data / "raw/123.json").write_text("{}")
         self.assertFalse(verified(self.store, files))
 
     def test_oversized_media_saved_as_partial_note(self):
-        with patch("x_bookmarks.export.download", side_effect=MediaTooLarge("larger than the 10 MB media limit")):
+        with patch("x2vault.export.download", side_effect=MediaTooLarge("larger than the 10 MB media limit")):
             self.assertEqual(process(self.client, "9", {"123": copy.deepcopy(ITEM)}, self.store, {},
                                      self.data / "s.json"), 0)
         note = self.api.files[f"{FOLDER}/{filename(ITEM)}"].decode()
@@ -161,7 +161,7 @@ class SizeCapTests(unittest.TestCase):
 
     def fetch(self, body, length, limit):
         response = FakeResponse(body, length)
-        with patch("x_bookmarks.export.urllib.request.urlopen", return_value=response):
+        with patch("x2vault.export.urllib.request.urlopen", return_value=response):
             download("https://media.example/x.mp4", self.path, limit=limit)
         return response
 
@@ -169,7 +169,7 @@ class SizeCapTests(unittest.TestCase):
         response = FakeResponse(b"x" * 11, 11)
         response.read = Mock(side_effect=AssertionError("body read despite Content-Length over the limit"))
         with self.assertRaises(MediaTooLarge), \
-                patch("x_bookmarks.export.urllib.request.urlopen", return_value=response):
+                patch("x2vault.export.urllib.request.urlopen", return_value=response):
             download("https://media.example/x.mp4", self.path, limit=10)
         self.assertFalse(self.path.exists())
 
