@@ -34,7 +34,7 @@ class APIError(RuntimeError):
 
 def token_request(client_id, form):
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    secret = os.environ.get("X_CLIENT_SECRET")
+    secret = os.environ.get("X2VAULT_X_CLIENT_SECRET")
     if secret:
         headers["Authorization"] = "Basic " + base64.b64encode(f"{client_id}:{secret}".encode()).decode()
     form["client_id"] = client_id
@@ -76,11 +76,28 @@ class Client:
         self.path = token_path
         self.token = json.loads(token_path.read_text())
 
+    def me(self):
+        user = self.request("GET", "/users/me")["data"]
+        self.token.update(user_id=user["id"], username=user.get("username"))
+        write_json(self.path, self.token)
+
     def user_id(self):
         if not self.token.get("user_id"):
-            self.token["user_id"] = self.request("GET", "/users/me")["data"]["id"]
-            write_json(self.path, self.token)
+            self.me()
         return self.token["user_id"]
+
+    def username(self):
+        if not self.token.get("username"):
+            self.me()
+        return self.token["username"]
+
+    def timeline(self, user_id, params):
+        """One page of the user's own posts (replies and reposts included)."""
+        return self.request("GET", f"/users/{user_id}/tweets", params)
+
+    def posts(self, ids, params):
+        """Batch lookup of up to 100 posts by ID."""
+        return self.request("GET", "/tweets", dict(params, ids=",".join(ids)))
 
     def lookup(self, post_id, vocabulary="tweet"):
         result = self.request("GET", f"/tweets/{post_id}", content_fields(vocabulary))

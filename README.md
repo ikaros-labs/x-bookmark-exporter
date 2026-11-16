@@ -1,6 +1,7 @@
 # x2vault
 
-A standalone Python 3.11+ CLI for Linux/macOS. Downloads individual bookmarked posts
+A standalone Python 3.11+ CLI for Linux/macOS. Exports your X bookmarks and your own
+posts (see [Your own posts](#your-own-posts)). Downloads individual bookmarked posts
 into an Obsidian vault, including photos, available MP4 video/GIF variants, long post
 text, poll results, source links, and YAML frontmatter. No runtime dependencies.
 X Articles include their full API-provided text and available media. Threads and
@@ -39,7 +40,7 @@ http://127.0.0.1:8765/callback
 ```
 
 Choose Native App for a public client. For a confidential client, supply its secret
-through `X_CLIENT_SECRET` during login and subsequent exports. Fund API credits as
+through `X2VAULT_X_CLIENT_SECRET` during login and subsequent exports. Fund API credits as
 needed. The scopes are `tweet.read users.read bookmark.read bookmark.write offline.access`.
 
 Run directly from this project; installation is optional:
@@ -53,8 +54,7 @@ Authorize in your browser, then paste the full redirected URL into the local CLI
 prompt promptly (authorization codes are short lived). A localhost connection error
 is expected: this CLI does not run a callback server. Do not paste the URL into chat.
 Tokens are stored with owner-only file permissions in
-`~/.config/x2vault/credentials.json`, outside the vault (an existing
-`~/.config/x-bookmark-exporter/credentials.json` is still used if the new file is absent). Refresh tokens
+`~/.config/x2vault/credentials.json`, outside the vault. Refresh tokens
 are updated automatically. `--credentials PATH` before the subcommand selects a
 different credentials file.
 
@@ -68,7 +68,7 @@ python3 -m x2vault export --vault /absolute/path/to/vault
 python3 -m x2vault export --vault /absolute/path/to/vault --limit 5 --keep-bookmarks
 
 # Choose another destination folder inside the vault.
-python3 -m x2vault export --vault /absolute/path/to/vault --folder Inbox/X
+python3 -m x2vault export --vault /absolute/path/to/vault --bookmarks-folder Inbox/X
 ```
 
 Output:
@@ -78,7 +78,7 @@ vault/X/
   2026-09-08 - alice - A few thoughts on coding agents - 123456789.md
   assets/123456789/1.jpg
   assets/123456789/2.mp4
-  .x-bookmarks/
+  .x2vault/
     inventory-USER_ID.json
     state-USER_ID.json
     receipts/123456789.json
@@ -135,19 +135,19 @@ python3 -m x2vault watch --vault /path/to/vault --assets-folder "Attachments/X m
 ```
 
 An explicit `--assets-folder` is relative to the **vault root**, independently of
-`--folder`. The examples place media under `vault/Attachments/X/POST_ID/` or
+`--bookmarks-folder`. The examples place media under `vault/Attachments/X/POST_ID/` or
 `vault/Attachments/X media/POST_ID/`. Paths outside the vault and application-state
 directories are rejected. Local embeds and verification records point to the chosen
 location. Shared folders outside the notes directory use relative Markdown embeds.
 
-You can also set `X_BOOKMARK_ASSETS_FOLDER`; the command-line flag takes precedence.
+You can also set `X2VAULT_ASSETS_FOLDER`; the command-line flag takes precedence.
 For the systemd service, add that variable to `~/.config/x2vault/service.env`.
 The service reads it on its next cycle. No value preserves the existing default.
 
 This setting applies to **new exports**. Existing notes, media, and receipts are
 reused at their original locations; changing the setting does not move them.
 When backing up exports, include the configured media directory as well as the notes
-and `.x-bookmarks` state.
+and `.x2vault` state.
 
 ## Continuous monitoring
 
@@ -164,7 +164,7 @@ This still incurs bookmark resource reads, including retained failed bookmarks;
 separate post lookups and expanded objects may incur additional charges.
 
 Failures retry after 1, 2, 4, 8, 16, then 24 hours (daily thereafter). Retry schedules and
-first-seen timestamps persist in `.x-bookmarks/monitor-USER_ID.json`. To reset a
+first-seen timestamps persist in `.x2vault/monitor-USER_ID.json`. To reset a
 deferred entry, stop monitoring and remove its entry from this file.
 The regular `export` command ignores monitor retry schedules for manual retries.
 
@@ -172,7 +172,7 @@ On Linux, the templates in [`examples/systemd/`](examples/systemd/) run a cycle 
 overlap, with logs in the journal. The example expects the checkout at
 `~/x2vault` and Python 3.11+ at `/usr/bin/python3`; adjust
 `WorkingDirectory` and `ExecStart` if needed. Configure your destination using
-`X_BOOKMARK_VAULT` in the local environment file. That directory receives an `X/`
+`X2VAULT_VAULT` in the local environment file. That directory receives an `X/`
 subdirectory. Changing directories does not move existing exports or their state.
 
 ```sh
@@ -180,7 +180,7 @@ mkdir -p ~/.config/systemd/user ~/.config/x2vault
 # For a new configuration only; preserve any existing local secrets/settings.
 cp -n .env.example ~/.config/x2vault/service.env
 chmod 600 ~/.config/x2vault/service.env
-# Edit service.env and set X_BOOKMARK_VAULT to your real absolute vault path.
+# Edit service.env and set X2VAULT_VAULT to your real absolute vault path.
 cp examples/systemd/x2vault.service examples/systemd/x2vault.timer ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now x2vault.timer
@@ -188,8 +188,8 @@ systemctl --user start --no-block x2vault.service
 journalctl --user -u x2vault.service -f
 ```
 
-If your OAuth client needs `X_CLIENT_SECRET`, set it in the owner-readable file
-`~/.config/x2vault/service.env` as `X_CLIENT_SECRET=...`.
+If your OAuth client needs `X2VAULT_X_CLIENT_SECRET`, set it in the owner-readable file
+`~/.config/x2vault/service.env` as `X2VAULT_X_CLIENT_SECRET=...`.
 Stop both timer and current cycle with:
 
 ```sh
@@ -200,37 +200,85 @@ systemctl --user stop x2vault.service
 User timers run while the user service manager is active. To keep them running after
 logout/start them at boot, enable user lingering with `loginctl enable-linger`.
 
+## Your own posts
+
+`watch` also exports your own posts after each bookmarks poll (`--no-posts` turns that
+off), and `posts` runs the same pass once. This only reads from X.
+
+```sh
+# First run: backfill everything X returns (up to 3,200 posts), with a raised budget.
+python3 -m x2vault posts --vault /absolute/path/to/vault --budget 1000
+```
+
+- **Where:** `--posts-folder` (`X2VAULT_POSTS_FOLDER`, default `3. Resources/X/my posts`).
+  Replies go to its `replies/` subfolder. File names are
+  `YYYY-MM-DD <first words> - <id>.md`. Media is saved like bookmark media, in the same
+  assets folder and with the same size cap.
+- **What:** posts (`Type: post`), quote posts (`Type: quote`, with the quoted post as a
+  `>` block) and replies (`Type: reply`, with the post they answer as a `>` block). A
+  reply to yourself is part of a thread: `Thread` holds the conversation ID, so a thread's
+  posts can be grouped. Plain reposts are skipped. Each note has the frontmatter `Type`,
+  `Date`, `Created`, `Lang`, `Link`, `Thread`, `Likes`, `Reposts`, `Replies`, `Quotes`,
+  `Bookmarks`, `Impressions` and `Stats updated`, then the text exactly as written
+  (long posts in full, `t.co` links expanded), media, and the parent or quoted post.
+- **Incremental:** after the backfill, each poll asks only for posts newer than the
+  newest one saved, so a poll with nothing new costs nothing.
+- **Stats:** once per UTC day, the stats of posts younger than 14 days are read again and
+  only those frontmatter keys (and `Stats updated`) are rewritten. Your other edits to the
+  note stay. After 14 days the stats are frozen. In Spall mode this uses
+  `PATCH /v1/notes/{path}`, so the Spall account needs `update` on the posts folder:
+
+  ```yaml
+  accounts:
+    x2vault:
+      access:
+        "3. Resources/X": [read, create]
+        "3. Resources/X/my posts": [read, create, update]
+  ```
+
+  Without `update`, the exporter logs a warning and skips the refresh.
+- **Cost and budget:** X charges per post returned: $0.001 for your own posts (an
+  "Owned Read" when the app belongs to you) and $0.005 for other people's posts (reply
+  parents and quoted posts, fetched in batches of up to 100). Every post returned counts
+  against `X2VAULT_POSTS_DAILY_READ_BUDGET` (default 200 per UTC day, `--budget N` on
+  `posts`). When the budget runs out, paging stops and the next day continues where it
+  left off. Each pass logs its reads and the estimated cost. Set a spending limit in the
+  X developer console as well.
+- **Base:** `My posts.base` is created in the posts folder once, if missing, with the
+  views "All" (newest first), "Top" (most likes) and "Posts only" (no replies). It is
+  never overwritten.
+
 ## Storage modes
 
 Every `export` and `watch` run needs exactly one destination:
 
 - `--vault PATH` (**file mode**, the default behavior above): notes and media are written
-  directly into a local vault folder. State lives in `<folder>/.x-bookmarks/` unless
+  directly into a local vault folder. State lives in `<folder>/.x2vault/` unless
   `--data-dir` says otherwise. Media size is unlimited unless `--max-media-mb` is set.
-- `--vault-api URL` (**API mode**): notes and media are created through
+- `--spall URL` (**Spall mode**): notes and media are created through
   [Spall](https://spall.nikmel.xyz) ([source](https://github.com/ikaros-labs/spall)),
   a scoped REST API for Obsidian vaults, using `PUT /v1/files/...` with
-  `If-None-Match: *`. The token comes from `X_VAULT_API_TOKEN`; the URL can also come
-  from `X_VAULT_API_URL`. The API never overwrites: an existing file with different
+  `If-None-Match: *`. The token comes from `X2VAULT_SPALL_TOKEN`; the URL can also come
+  from `X2VAULT_SPALL_URL`. The API never overwrites: an existing file with different
   content is an error and the bookmark is kept. Files are verified through the API's
   SHA-256 ETag before a bookmark is removed.
 
 ```sh
-export X_VAULT_API_TOKEN=vlt_...   # account with [read, create] on "3. Resources/X"
-python3 -m x2vault watch --vault-api http://127.0.0.1:8787 \
+export X2VAULT_SPALL_TOKEN=spl_...   # account with [read, create] on "3. Resources/X"
+python3 -m x2vault watch --spall http://127.0.0.1:8787 \
   --data-dir ~/.local/state/x2vault \
-  --folder "3. Resources/X/inbox" --assets-folder "3. Resources/X/assets"
+  --bookmarks-folder "3. Resources/X/inbox" --assets-folder "3. Resources/X/assets"
 ```
 
-In API mode:
+In Spall mode:
 
-- `--data-dir` (or `X_BOOKMARK_DATA_DIR`) is **required**. It holds the state, monitor
+- `--data-dir` (or `X2VAULT_DATA_DIR`) is **required**. It holds the state, monitor
   queue, inventory, receipts, raw JSON and lock. Spall hides dotfiles, so none
   of this goes into the vault.
-- `--folder` and `--assets-folder` are vault paths, exactly as in file mode (the
-  token's account should have no `root`). Both also read `X_BOOKMARK_FOLDER` and
-  `X_BOOKMARK_ASSETS_FOLDER`.
-- Media larger than `--max-media-mb` (`X_BOOKMARK_MAX_MEDIA_MB`, **default 10**, matching
+- `--bookmarks-folder` and `--assets-folder` are vault paths, exactly as in file mode (the
+  token's account should have no `root`). Both also read `X2VAULT_BOOKMARKS_FOLDER` and
+  `X2VAULT_ASSETS_FOLDER`.
+- Media larger than `--max-media-mb` (`X2VAULT_MAX_MEDIA_MB`, **default 10**, matching
   Spall's default 10 MiB body limit) is skipped. The note is saved as a partial
   export with a warning naming the media URL; the original post link is always in the
   note. The size is checked from `Content-Length` before downloading, and a download
@@ -242,16 +290,16 @@ In API mode:
 
 ### Moving existing state into a data dir
 
-To switch an existing file-mode setup to API mode (or to an explicit `--data-dir`),
+To switch an existing file-mode setup to Spall mode (or to an explicit `--data-dir`),
 stop the old exporter first (never run two: X rotates refresh tokens), then copy its
 state folder without the lock:
 
 ```sh
 mkdir -p /path/to/data-dir
-rsync -a --exclude lock "/path/to/vault/X/.x-bookmarks/" /path/to/data-dir/
+rsync -a --exclude lock "/path/to/vault/X/.x2vault/" /path/to/data-dir/
 ```
 
-Receipts keep listing raw files as `.x-bookmarks/raw/ID.json`; those are checked in
+Receipts keep listing raw files as `.x2vault/raw/ID.json`; those are checked in
 the data dir and everything else through the store, so every already-exported
 bookmark is recognised and nothing is exported again. Keep the old folder until the
 new setup has run cleanly; it is the rollback.
@@ -260,26 +308,28 @@ new setup has run cleanly; it is the rollback.
 
 A multi-arch image (`linux/amd64`, `linux/arm64`) is published to
 `ghcr.io/ikaros-labs/x2vault` on every push to `main` (`latest` plus the
-full commit SHA) and on `v*` tags (semver tags). It runs `watch --interval 300` in API
+full commit SHA) and on `v*` tags (semver tags). It runs `watch --interval 300` in Spall
 mode as a non-root user (UID 10001). There is no HTTP port.
 
 `/data` is the volume: credentials in `/data/credentials.json`, state in `/data/state`.
 
 | Variable | |
 |---|---|
-| `X_VAULT_API_URL` | Spall base URL (required) |
-| `X_VAULT_API_TOKEN` | Spall token with `[read, create]` on the folders below (required) |
-| `X_CLIENT_ID` | your X developer app's client ID (required for login) |
-| `X_CLIENT_SECRET` | only for confidential OAuth clients |
-| `X_BOOKMARK_FOLDER` | notes folder, default `3. Resources/X/inbox` |
-| `X_BOOKMARK_ASSETS_FOLDER` | media folder, default `3. Resources/X/assets` |
-| `X_BOOKMARK_MAX_MEDIA_MB` | media size cap, default `10` |
-| `X_BOOKMARK_DATA_DIR` | state folder, default `/data/state` |
+| `X2VAULT_SPALL_URL` | Spall base URL (required) |
+| `X2VAULT_SPALL_TOKEN` | Spall token with `[read, create]` on the folders below, plus `update` on the posts folder (required) |
+| `X2VAULT_X_CLIENT_ID` | your X developer app's client ID (required for login) |
+| `X2VAULT_X_CLIENT_SECRET` | only for confidential OAuth clients |
+| `X2VAULT_BOOKMARKS_FOLDER` | notes folder, default `3. Resources/X/inbox` |
+| `X2VAULT_ASSETS_FOLDER` | media folder, default `3. Resources/X/assets` |
+| `X2VAULT_MAX_MEDIA_MB` | media size cap, default `10` |
+| `X2VAULT_DATA_DIR` | state folder, default `/data/state` |
+| `X2VAULT_POSTS_FOLDER` | your own posts, default `3. Resources/X/my posts` |
+| `X2VAULT_POSTS_DAILY_READ_BUDGET` | billable post reads per UTC day, default `200` |
 
 ```sh
 docker run -d --name x2vault --restart unless-stopped \
-  -e X_VAULT_API_URL=http://spall-host:8787 -e X_VAULT_API_TOKEN=vlt_... \
-  -e X_CLIENT_ID=... -v x-bookmarks-data:/data \
+  -e X2VAULT_SPALL_URL=http://spall-host:8787 -e X2VAULT_SPALL_TOKEN=spl_... \
+  -e X2VAULT_X_CLIENT_ID=... -v x2vault-data:/data \
   ghcr.io/ikaros-labs/x2vault:latest
 # One-time login: open the printed URL, then paste the redirected URL.
 docker exec -it x2vault python -m x2vault --credentials /data/credentials.json login
@@ -293,7 +343,7 @@ Until credentials exist, the container waits and checks again every minute, and 
 reports healthy while it waits for login. After that, the `HEALTHCHECK` reports
 unhealthy when no poll has succeeded for 15 minutes. To carry over existing
 credentials and state instead of logging in again, copy `credentials.json` to `/data/`
-and the old `.x-bookmarks` contents (without `lock`) to `/data/state/`, owned by UID 10001.
+and the old `.x2vault` contents (without `lock`) to `/data/state/`, owned by UID 10001.
 
 ## API limitations
 

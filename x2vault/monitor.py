@@ -76,7 +76,8 @@ def poll(client, output, vocabulary="tweet", keep=False, assets_dir=None):
     return failed
 
 
-def watch(client, output, vocabulary="tweet", keep=False, interval=300, once=False, assets_dir=None):
+def watch(client, output, vocabulary="tweet", keep=False, interval=300, once=False, assets_dir=None, after=None):
+    """`after` (the posts pass) runs after every bookmarks poll; its failures never stop the loop."""
     while True:
         try:
             poll(client, output, vocabulary, keep, assets_dir=assets_dir)
@@ -84,6 +85,11 @@ def watch(client, output, vocabulary="tweet", keep=False, interval=300, once=Fal
             if once:
                 raise
             print(f"Poll failed: {error}. Retrying after the polling interval.", flush=True)
+        if after is not None:
+            try:
+                after()
+            except (OSError, ValueError, RuntimeError) as error:
+                print(f"Posts pass failed: {error}. Retrying after the polling interval.", flush=True)
         if once:
             return
         print(f"Next poll in {interval} seconds.", flush=True)

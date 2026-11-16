@@ -8,11 +8,11 @@ from email.message import Message
 from pathlib import Path, PurePosixPath
 from unittest.mock import Mock, patch
 
-from fake_vault_api import FakeVaultAPI
+from fake_spall import FakeSpall
 from x2vault.export import MediaTooLarge, archive, download, process, verified
 from x2vault.monitor import poll
 from x2vault.naming import filename
-from x2vault.store import ApiStore, StoreError
+from x2vault.store import SpallStore, StoreError
 
 FOLDER = "3. Resources/X/inbox"
 ITEM = {"post": {"id": "123", "text": "Photo post", "attachments": {"media_keys": ["m"]}},
@@ -23,15 +23,15 @@ def sha(data):
     return hashlib.sha256(data).hexdigest()
 
 
-class ApiStoreTests(unittest.TestCase):
+class SpallStoreTests(unittest.TestCase):
     def setUp(self):
-        self.api = FakeVaultAPI()
+        self.api = FakeSpall()
         self.addCleanup(self.api.close)
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.data = Path(tmp.name) / "state"
         self.sleeps = []
-        self.store = ApiStore(self.api.url, "secret", FOLDER, self.data, max_media_bytes=10 * 2**20,
+        self.store = SpallStore(self.api.url, "secret", FOLDER, self.data, max_media_bytes=10 * 2**20,
                               sleep=self.sleeps.append)
         self.client = Mock()
         self.client.user_id.return_value = "9"
@@ -81,7 +81,7 @@ class ApiStoreTests(unittest.TestCase):
         self.assertEqual(len(self.sleeps), 3)
 
     def test_network_error_retried(self):
-        store = ApiStore("http://127.0.0.1:9", "secret", FOLDER, self.data, sleep=self.sleeps.append)
+        store = SpallStore("http://127.0.0.1:9", "secret", FOLDER, self.data, sleep=self.sleeps.append)
         with self.assertRaisesRegex(StoreError, "unreachable"):
             store.exists("note.md")
         self.assertEqual(len(self.sleeps), 3)
@@ -111,10 +111,10 @@ class ApiStoreTests(unittest.TestCase):
             self.assertEqual(process(self.client, "9", {"123": ITEM}, self.store, state, self.data / "s.json",
                                      assets_dir=assets), 0)
         files = state["123"]["files"]
-        self.assertEqual(set(files), {"../assets/123/1.jpg", ".x-bookmarks/raw/123.json", filename(ITEM)})
+        self.assertEqual(set(files), {"../assets/123/1.jpg", ".x2vault/raw/123.json", filename(ITEM)})
         self.assertTrue((self.data / "raw/123.json").is_file())
         self.assertTrue((self.data / "receipts/123.json").is_file())
-        self.assertFalse(any(".x-bookmarks" in path for path in self.api.files))
+        self.assertFalse(any(".x2vault" in path for path in self.api.files))
         self.assertTrue(verified(self.store, files))
         self.assertIn("![](../assets/123/1.jpg)", self.api.files[f"{FOLDER}/{filename(ITEM)}"].decode())
         # The receipt is reused: no second upload or download.
@@ -136,9 +136,9 @@ class ApiStoreTests(unittest.TestCase):
         self.client.remove.assert_called_once()
 
     def test_paths_must_stay_in_vault(self):
-        for folder in ("", "/abs", "../up", "X/.x-bookmarks"):
+        for folder in ("", "/abs", "../up", "X/.x2vault"):
             with self.subTest(folder=folder), self.assertRaises(ValueError):
-                ApiStore(self.api.url, "secret", folder, self.data)
+                SpallStore(self.api.url, "secret", folder, self.data)
         with self.assertRaises(ValueError):
             self.store.url("../../../../outside.md")
 

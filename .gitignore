@@ -13,7 +13,7 @@ service.env
 *.key
 *.p12
 *.pfx
-.x-bookmarks/
+.x2vault/
 .obsidian/
 vault/
 exports/

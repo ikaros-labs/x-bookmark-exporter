@@ -43,7 +43,7 @@ class AssetsTests(unittest.TestCase):
         self.assertFalse(verified(self.output, files))
 
     def test_path_validation(self):
-        for folder in ('', '/tmp/media', '../outside', '.obsidian/assets', 'X/.x-bookmarks'):
+        for folder in ('', '/tmp/media', '../outside', '.obsidian/assets', 'X/.x2vault'):
             with self.subTest(folder=folder), self.assertRaises(ValueError):
                 assets_directory(self.vault, self.output, folder)
 
@@ -63,6 +63,6 @@ class AssetsTests(unittest.TestCase):
         with patch('x2vault.export.download', side_effect=self.download):
             watch(client, self.output, once=True, assets_dir=target)
         self.assertTrue((target/'123/1.jpg').exists())
-        state = json.loads((self.output/'.x-bookmarks/state-9.json').read_text())
+        state = json.loads((self.output/'.x2vault/state-9.json').read_text())
         self.assertTrue(verified(self.output, state['123']['files']))
         client.remove.assert_called_once_with('9', '123')

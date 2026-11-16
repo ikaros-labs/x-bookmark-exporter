@@ -14,7 +14,7 @@ class MonitorTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.output = Path(self.tmp.name)
-        self.internal = self.output / '.x-bookmarks'
+        self.internal = self.output / '.x2vault'
         self.client = Mock()
         self.client.user_id.return_value = '9'
         self.client.inventory.return_value = {'123': {}}

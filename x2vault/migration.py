@@ -31,7 +31,7 @@ def finish(output, journal, internal):
 
 
 def migrate(output, internal=None):
-    internal = internal or output / ".x-bookmarks"
+    internal = internal or output / ".x2vault"
     journal = internal / "rename-pending.json"
     if journal.exists():
         finish(output, journal, internal)
