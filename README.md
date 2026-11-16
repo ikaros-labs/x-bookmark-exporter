@@ -199,6 +199,85 @@ systemctl --user stop x-bookmarks.service
 User timers run while the user service manager is active. To keep them running after
 logout/start them at boot, enable user lingering with `loginctl enable-linger`.
 
+## Storage modes
+
+Every `export` and `watch` run needs exactly one destination:
+
+- `--vault PATH` (**file mode**, the default behavior above): notes and media are written
+  directly into a local vault folder. State lives in `<folder>/.x-bookmarks/` unless
+  `--data-dir` says otherwise. Media size is unlimited unless `--max-media-mb` is set.
+- `--vault-api URL` (**API mode**): notes and media are created through
+  [obsidian-api](https://github.com/ikaros-labs/obsidian-api) (`PUT /v1/files/...` with
+  `If-None-Match: *`). The token comes from `X_VAULT_API_TOKEN`; the URL can also come
+  from `X_VAULT_API_URL`. The API never overwrites: an existing file with different
+  content is an error and the bookmark is kept. Files are verified through the API's
+  SHA-256 ETag before a bookmark is removed.
+
+```sh
+export X_VAULT_API_TOKEN=vlt_...   # account with [read, create] on "3. Resources/X"
+python3 -m x_bookmarks watch --vault-api http://127.0.0.1:8787 \
+  --data-dir ~/.local/state/x-bookmarks \
+  --folder "3. Resources/X/inbox" --assets-folder "3. Resources/X/assets"
+```
+
+In API mode:
+
+- `--data-dir` (or `X_BOOKMARK_DATA_DIR`) is **required**. It holds the state, monitor
+  queue, inventory, receipts, raw JSON and lock. obsidian-api hides dotfiles, so none
+  of this goes into the vault.
+- `--folder` and `--assets-folder` are vault paths, exactly as in file mode (the
+  token's account should have no `root`). Both also read `X_BOOKMARK_FOLDER` and
+  `X_BOOKMARK_ASSETS_FOLDER`.
+- Media larger than `--max-media-mb` (`X_BOOKMARK_MAX_MEDIA_MB`, **default 10**, matching
+  obsidian-api's default 10 MiB body limit) is skipped. The note is saved as a partial
+  export with a warning naming the media URL; the original post link is always in the
+  note. The size is checked from `Content-Length` before downloading, and a download
+  stops as soon as it passes the limit.
+- Network errors and HTTP 5xx from the API are retried 3 times with backoff. Any 4xx
+  (bad token, missing grant, body too large) fails that post: the bookmark is kept
+  and the error is recorded in the monitor queue for a later retry.
+- `migrate` works only in file mode.
+
+### Moving existing state into a data dir
+
+To switch an existing file-mode setup to API mode (or to an explicit `--data-dir`),
+stop the old exporter first (never run two: X rotates refresh tokens), then copy its
+state folder without the lock:
+
+```sh
+mkdir -p /path/to/data-dir
+rsync -a --exclude lock "/path/to/vault/X/.x-bookmarks/" /path/to/data-dir/
+```
+
+Receipts keep listing raw files as `.x-bookmarks/raw/ID.json`; those are checked in
+the data dir and everything else through the store, so every already-exported
+bookmark is recognised and nothing is exported again. Keep the old folder until the
+new setup has run cleanly; it is the rollback.
+
+## Docker
+
+The `Dockerfile` runs `watch --interval 300` in API mode as a non-root user. `/data` is
+the volume: credentials in `/data/credentials.json`, state in `/data/state`. There is
+no HTTP port.
+
+```sh
+docker build -t x-bookmarks .
+docker run -d --name x-bookmarks --restart unless-stopped \
+  -e X_VAULT_API_URL=http://obsidian-api-host:8787 -e X_VAULT_API_TOKEN=vlt_... \
+  -e X_CLIENT_ID=... -v x-bookmarks-data:/data x-bookmarks
+# One-time login: open the printed URL, then paste the redirected URL.
+docker exec -it x-bookmarks python -m x_bookmarks --credentials /data/credentials.json login
+```
+
+Until credentials exist, the container waits and checks again every minute. Defaults
+baked into the image: `X_BOOKMARK_FOLDER="3. Resources/X/inbox"`,
+`X_BOOKMARK_ASSETS_FOLDER="3. Resources/X/assets"`, `X_BOOKMARK_DATA_DIR=/data/state`.
+Set `X_CLIENT_SECRET` for confidential clients. The `HEALTHCHECK` reports unhealthy when
+no poll has succeeded for 15 minutes. To carry over existing credentials and state
+instead of logging in again, copy `credentials.json` to `/data/` and the old
+`.x-bookmarks` contents (without `lock`) to `/data/state/`, owned by UID 10001.
+See [`examples/docker/docker-compose.yml`](examples/docker/docker-compose.yml).
+
 ## API limitations
 
 X Articles export their API-provided `plain_text` body and title, with cover/inline

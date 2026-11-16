@@ -5,9 +5,10 @@ import json
 from .export import digest, verified
 from .naming import filename
 from .storage import atomic_write, write_json
+from .store import FileStore
 
 
-def finish(output, journal):
+def finish(output, journal, internal):
     change = json.loads(journal.read_text())
     old, new = output / change["old"], output / change["new"]
     if old.exists() and digest(old) != change["old_hash"]:
@@ -16,9 +17,8 @@ def finish(output, journal):
         raise ValueError(f"Destination conflict: {new}")
     if not new.exists():
         atomic_write(new, change["body"].encode())
-    if not verified(output, change["files"]):
+    if not verified(FileStore(output, internal), change["files"]):
         raise ValueError("Migration files failed verification")
-    internal = output / ".x-bookmarks"
     write_json(internal / f"receipts/{change['id']}.json", change["files"])
     for path in internal.glob("state-*.json"):
         state = json.loads(path.read_text())
@@ -30,11 +30,11 @@ def finish(output, journal):
     journal.unlink()
 
 
-def migrate(output):
-    internal = output / ".x-bookmarks"
+def migrate(output, internal=None):
+    internal = internal or output / ".x-bookmarks"
     journal = internal / "rename-pending.json"
     if journal.exists():
-        finish(output, journal)
+        finish(output, journal, internal)
     count = 0
     for receipt in sorted((internal / "receipts").glob("*.json")):
         post_id = receipt.stem
@@ -42,7 +42,7 @@ def migrate(output):
         files = json.loads(receipt.read_text())
         if old not in files:
             continue
-        if not verified(output, files):
+        if not verified(FileStore(output, internal), files):
             print(f"{post_id}: migration skipped; saved files changed or are missing", flush=True)
             continue
         item = json.loads((internal / f"raw/{post_id}.json").read_text())
@@ -58,6 +58,6 @@ def migrate(output):
         updated[new] = hashlib.sha256(body.encode()).hexdigest()
         write_json(journal, {"id": post_id, "old": old, "new": new, "old_hash": files[old],
                              "files": updated, "body": body})
-        finish(output, journal)
+        finish(output, journal, internal)
         count += 1
     return count

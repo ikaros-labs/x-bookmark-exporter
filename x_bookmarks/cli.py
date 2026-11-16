@@ -2,8 +2,9 @@ import argparse
 import fcntl
 import json
 import os
+import time
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from .api import Client, login
 from .export import process
@@ -11,6 +12,28 @@ from .storage import write_json
 from .migration import migrate
 from .monitor import watch
 from .paths import assets_directory
+from .store import ApiStore, FileStore, vault_path
+
+FOLDER = os.environ.get("X_BOOKMARK_FOLDER", "X")
+
+
+def positive_number(value):
+    number = float(value)
+    if number <= 0:
+        raise argparse.ArgumentTypeError("must be positive")
+    return number
+
+
+def add_target(command, api=True):
+    target = command.add_mutually_exclusive_group()
+    target.add_argument("--vault", type=Path, help="Local vault folder (file mode)")
+    target.add_argument("--vault-api", metavar="URL", help="obsidian-api base URL (API mode; token from X_VAULT_API_TOKEN; "
+                        "also X_VAULT_API_URL)" if api else "Not supported: migrate is file-mode only")
+    command.add_argument("--folder", default=FOLDER,
+                         help="Notes folder relative to the vault (default: X); also X_BOOKMARK_FOLDER")
+    command.add_argument("--data-dir", type=Path, default=os.environ.get("X_BOOKMARK_DATA_DIR"),
+                         help="Exporter state, receipts, raw JSON and lock (default: <folder>/.x-bookmarks in file "
+                              "mode; required in API mode); also X_BOOKMARK_DATA_DIR")
 
 
 def main():
@@ -21,18 +44,15 @@ def main():
     auth.add_argument("--client-id", default=os.environ.get("X_CLIENT_ID"))
     auth.add_argument("--redirect-uri", default="http://127.0.0.1:8765/callback")
     export = commands.add_parser("export", help="Save posts/media, then remove successfully exported bookmarks")
-    export.add_argument("--vault", required=True, type=Path)
-    export.add_argument("--folder", default="X", help="Relative folder within the vault (default: X)")
+    add_target(export)
     export.add_argument("--keep-bookmarks", action="store_true")
     export.add_argument("--limit", type=int, help="Maximum bookmarks to process this run")
     export.add_argument("--api-vocabulary", choices=["tweet", "post"], default="tweet",
                         help="Field naming used by your API deployment; use post if tweet.fields is rejected")
     migration = commands.add_parser("migrate", help="Rename existing verified notes locally, without API calls")
-    migration.add_argument("--vault", required=True, type=Path)
-    migration.add_argument("--folder", default="X")
+    add_target(migration, api=False)
     monitor = commands.add_parser("watch", help="Continuously export new bookmarks with lightweight discovery")
-    monitor.add_argument("--vault", required=True, type=Path)
-    monitor.add_argument("--folder", default="X")
+    add_target(monitor)
     monitor.add_argument("--interval", type=int, default=300, help="Seconds between polls (default: 300)")
     monitor.add_argument("--once", action="store_true", help="Run one polling cycle, for service timers")
     monitor.add_argument("--keep-bookmarks", action="store_true")
@@ -40,11 +60,20 @@ def main():
     for command in (export, monitor):
         command.add_argument("--assets-folder", default=os.environ.get("X_BOOKMARK_ASSETS_FOLDER"),
                              help="Media folder relative to vault root (default: assets inside the notes folder); also X_BOOKMARK_ASSETS_FOLDER")
+        command.add_argument("--max-media-mb", type=positive_number, default=os.environ.get("X_BOOKMARK_MAX_MEDIA_MB"),
+                             help="Skip larger media with a partial-note warning (default: 10 in API mode, "
+                                  "unlimited in file mode); also X_BOOKMARK_MAX_MEDIA_MB")
     args = parser.parse_args()
     args.credentials = args.credentials.expanduser().resolve()
     args.credentials.parent.mkdir(parents=True, exist_ok=True)
     lock_path = args.credentials.with_suffix(".lock")
     try:
+        # A long-running watch (e.g. a fresh container) waits for `login` instead of exiting; the
+        # credentials lock is not held yet, so login can run alongside it.
+        while args.command == "watch" and not args.once and not args.credentials.exists():
+            print(f"No credentials at {args.credentials}; run the login command. Checking again in 60 seconds.",
+                  flush=True)
+            time.sleep(60)
         with lock_path.open("a") as credential_lock:
             fcntl.flock(credential_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             if args.command == "login":
@@ -56,19 +85,39 @@ def main():
                 parser.error("--limit must be positive")
             if args.command == "watch" and args.interval < 60:
                 parser.error("--interval must be at least 60 seconds")
-            vault = args.vault.expanduser().resolve()
-            output = (vault / args.folder).resolve()
-            if not output.is_relative_to(vault):
-                parser.error("--folder must remain inside the vault")
-            assets_dir = assets_directory(vault, output, args.assets_folder) if args.command != "migrate" else None
-            output.mkdir(parents=True, exist_ok=True)
-            internal = output / ".x-bookmarks"
-            internal.mkdir(exist_ok=True)
+            if args.vault is None and args.vault_api is None and args.command != "migrate":
+                args.vault_api = os.environ.get("X_VAULT_API_URL")
+            if args.vault_api is not None:
+                if args.command == "migrate":
+                    parser.error("migrate works only on a local vault: use --vault PATH")
+                if args.data_dir is None:
+                    parser.error("API mode requires --data-dir or X_BOOKMARK_DATA_DIR (state must stay out of the vault)")
+                internal = args.data_dir.expanduser().resolve()
+                limit = args.max_media_mb if args.max_media_mb is not None else 10
+                output = ApiStore(args.vault_api, os.environ.get("X_VAULT_API_TOKEN"), args.folder, internal,
+                                  max_media_bytes=int(float(limit) * 2**20))
+                assets_dir = None
+                if args.assets_folder is not None:
+                    assets_dir = PurePosixPath("/") / vault_path(args.assets_folder, "--assets-folder")
+            else:
+                if args.vault is None:
+                    parser.error("Provide exactly one of --vault PATH or --vault-api URL")
+                vault = args.vault.expanduser().resolve()
+                output = (vault / args.folder).resolve()
+                if not output.is_relative_to(vault):
+                    parser.error("--folder must remain inside the vault")
+                assets_dir = assets_directory(vault, output, args.assets_folder) if args.command != "migrate" else None
+                output.mkdir(parents=True, exist_ok=True)
+                internal = args.data_dir.expanduser().resolve() if args.data_dir else output / ".x-bookmarks"
+                limit = getattr(args, "max_media_mb", None)
+            internal.mkdir(parents=True, exist_ok=True)
             with (internal / "lock").open("a") as lock:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                print(f"Migrated {migrate(output)} existing notes.", flush=True)
-                if args.command == "migrate":
-                    return
+                if isinstance(output, Path):
+                    print(f"Migrated {migrate(output, internal)} existing notes.", flush=True)
+                    if args.command == "migrate":
+                        return
+                    output = FileStore(output, internal, int(float(limit) * 2**20) if limit is not None else None)
                 client = Client(args.credentials)
                 if args.command == "watch":
                     watch(client, output, args.api_vocabulary, args.keep_bookmarks, args.interval, args.once,
@@ -89,7 +138,7 @@ def main():
                 print(f"Collected {len(items)} bookmarks.", flush=True)
                 failed = process(client, user_id, items, output, state, state_path, args.keep_bookmarks,
                                  assets_dir=assets_dir)
-                print(f"Finished: {len(items) - failed} successful, {failed} failed. Output: {output}")
+                print(f"Finished: {len(items) - failed} successful, {failed} failed. Output: {output.root}")
                 if failed:
                     raise SystemExit(1)
     except BlockingIOError:
