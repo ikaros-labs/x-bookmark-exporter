@@ -256,28 +256,42 @@ new setup has run cleanly; it is the rollback.
 
 ## Docker
 
-The `Dockerfile` runs `watch --interval 300` in API mode as a non-root user. `/data` is
-the volume: credentials in `/data/credentials.json`, state in `/data/state`. There is
-no HTTP port.
+A multi-arch image (`linux/amd64`, `linux/arm64`) is published to
+`ghcr.io/ikaros-labs/x-bookmark-exporter` on every push to `main` (`latest` plus the
+full commit SHA) and on `v*` tags (semver tags). It runs `watch --interval 300` in API
+mode as a non-root user (UID 10001). There is no HTTP port.
+
+`/data` is the volume: credentials in `/data/credentials.json`, state in `/data/state`.
+
+| Variable | |
+|---|---|
+| `X_VAULT_API_URL` | obsidian-api base URL (required) |
+| `X_VAULT_API_TOKEN` | obsidian-api token with `[read, create]` on the folders below (required) |
+| `X_CLIENT_ID` | your X developer app's client ID (required for login) |
+| `X_CLIENT_SECRET` | only for confidential OAuth clients |
+| `X_BOOKMARK_FOLDER` | notes folder, default `3. Resources/X/inbox` |
+| `X_BOOKMARK_ASSETS_FOLDER` | media folder, default `3. Resources/X/assets` |
+| `X_BOOKMARK_MAX_MEDIA_MB` | media size cap, default `10` |
+| `X_BOOKMARK_DATA_DIR` | state folder, default `/data/state` |
 
 ```sh
-docker build -t x-bookmarks .
 docker run -d --name x-bookmarks --restart unless-stopped \
   -e X_VAULT_API_URL=http://obsidian-api-host:8787 -e X_VAULT_API_TOKEN=vlt_... \
-  -e X_CLIENT_ID=... -v x-bookmarks-data:/data x-bookmarks
+  -e X_CLIENT_ID=... -v x-bookmarks-data:/data \
+  ghcr.io/ikaros-labs/x-bookmark-exporter:latest
 # One-time login: open the printed URL, then paste the redirected URL.
 docker exec -it x-bookmarks python -m x_bookmarks --credentials /data/credentials.json login
 ```
 
-Until credentials exist, the container waits and checks again every minute. Defaults
-baked into the image: `X_BOOKMARK_FOLDER="3. Resources/X/inbox"`,
-`X_BOOKMARK_ASSETS_FOLDER="3. Resources/X/assets"`, `X_BOOKMARK_DATA_DIR=/data/state`.
-Set `X_CLIENT_SECRET` for confidential clients. The container reports healthy while it
-waits for login (no `/data/credentials.json` yet); after that, the `HEALTHCHECK` reports
-unhealthy when no poll has succeeded for 15 minutes. To carry over existing credentials and state
-instead of logging in again, copy `credentials.json` to `/data/` and the old
-`.x-bookmarks` contents (without `lock`) to `/data/state/`, owned by UID 10001.
-See [`examples/docker/docker-compose.yml`](examples/docker/docker-compose.yml).
+With compose, use [`examples/docker/docker-compose.yml`](examples/docker/docker-compose.yml)
+(`docker compose up -d`, then the same login command via `docker compose exec`). To
+build locally instead: `docker build -t x-bookmarks .`.
+
+Until credentials exist, the container waits and checks again every minute, and it
+reports healthy while it waits for login. After that, the `HEALTHCHECK` reports
+unhealthy when no poll has succeeded for 15 minutes. To carry over existing
+credentials and state instead of logging in again, copy `credentials.json` to `/data/`
+and the old `.x-bookmarks` contents (without `lock`) to `/data/state/`, owned by UID 10001.
 
 ## API limitations
 
