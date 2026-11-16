@@ -11,10 +11,13 @@ from .export import process
 from .storage import write_json
 from .migration import migrate
 from .monitor import watch
+from .posts import export_posts
 from .paths import assets_directory
 from .store import SpallStore, FileStore, vault_path
 
 FOLDER = os.environ.get("X2VAULT_BOOKMARKS_FOLDER", "X")
+POSTS_FOLDER = os.environ.get("X2VAULT_POSTS_FOLDER", "3. Resources/X/my posts")
+POSTS_BUDGET = os.environ.get("X2VAULT_POSTS_DAILY_READ_BUDGET", "200")
 
 
 def positive_number(value):
@@ -58,7 +61,17 @@ def main():
     monitor.add_argument("--once", action="store_true", help="Run one polling cycle, for service timers")
     monitor.add_argument("--keep-bookmarks", action="store_true")
     monitor.add_argument("--api-vocabulary", choices=["tweet", "post"], default="tweet")
-    for command in (export, monitor):
+    monitor.add_argument("--no-posts", action="store_true", help="Skip the posts pass after each bookmarks poll")
+    own = commands.add_parser("posts", help="Export your own posts once (backfill or catch up), within the daily budget")
+    add_target(own)
+    own.add_argument("--budget", type=int, default=int(POSTS_BUDGET),
+                     help="Billable post reads per UTC day, shared with watch (default: 200); "
+                          "also X2VAULT_POSTS_DAILY_READ_BUDGET")
+    for command in (monitor, own):
+        command.add_argument("--posts-folder", default=POSTS_FOLDER,
+                             help="Folder for your own posts, relative to the vault; replies go to its replies/ "
+                                  "subfolder (default: 3. Resources/X/my posts); also X2VAULT_POSTS_FOLDER")
+    for command in (export, monitor, own):
         command.add_argument("--assets-folder", default=os.environ.get("X2VAULT_ASSETS_FOLDER"),
                              help="Media folder relative to vault root (default: assets inside the notes folder); also X2VAULT_ASSETS_FOLDER")
         command.add_argument("--max-media-mb", type=positive_number, default=os.environ.get("X2VAULT_MAX_MEDIA_MB"),
@@ -100,6 +113,10 @@ def main():
                 assets_dir = None
                 if args.assets_folder is not None:
                     assets_dir = PurePosixPath("/") / vault_path(args.assets_folder, "--assets-folder")
+                if args.command in {"watch", "posts"}:
+                    posts_store = SpallStore(args.spall, os.environ.get("X2VAULT_SPALL_TOKEN"), args.posts_folder,
+                                             internal, max_media_bytes=int(float(limit) * 2**20), option="--posts-folder")
+                    posts_args = dict(assets_dir=assets_dir, folder=vault_path(args.posts_folder, "--posts-folder"))
             else:
                 if args.vault is None:
                     parser.error("Provide exactly one of --vault PATH or --spall URL")
@@ -111,18 +128,32 @@ def main():
                 output.mkdir(parents=True, exist_ok=True)
                 internal = args.data_dir.expanduser().resolve() if args.data_dir else output / ".x2vault"
                 limit = getattr(args, "max_media_mb", None)
+                if args.command in {"watch", "posts"}:
+                    posts_out = (vault / args.posts_folder).resolve()
+                    if not posts_out.is_relative_to(vault) or posts_out == vault:
+                        parser.error("--posts-folder must be a folder inside the vault")
+                    posts_store = FileStore(posts_out, internal, int(float(limit) * 2**20) if limit is not None else None)
+                    posts_args = dict(assets_dir=assets_directory(vault, posts_out, args.assets_folder),
+                                      folder=posts_out.relative_to(vault).as_posix())
             internal.mkdir(parents=True, exist_ok=True)
             with (internal / "lock").open("a") as lock:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                if isinstance(output, Path):
+                if isinstance(output, Path) and args.command == "posts":
+                    output = None
+                elif isinstance(output, Path):
                     print(f"Migrated {migrate(output, internal)} existing notes.", flush=True)
                     if args.command == "migrate":
                         return
                     output = FileStore(output, internal, int(float(limit) * 2**20) if limit is not None else None)
                 client = Client(args.credentials)
+                if args.command == "posts":
+                    export_posts(client, posts_store, args.budget, **posts_args)
+                    return
                 if args.command == "watch":
+                    after = None if args.no_posts else lambda: export_posts(client, posts_store, int(POSTS_BUDGET),
+                                                                          **posts_args)
                     watch(client, output, args.api_vocabulary, args.keep_bookmarks, args.interval, args.once,
-                          assets_dir=assets_dir)
+                          assets_dir=assets_dir, after=after)
                     return
                 user_id = client.user_id()
                 state_path = internal / f"state-{user_id}.json"

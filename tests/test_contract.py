@@ -4,8 +4,9 @@
     X2VAULT_TEST_VAULT=/path/to/the/served/vault [X2VAULT_TEST_FIXTURE_STATE=/path/to/inbox/.x2vault] \\
     python3 -m unittest discover -s tests -p test_contract.py -v
 
-The token's account needs read and create on "3. Resources/X". X2VAULT_TEST_VAULT is the
-local folder the server serves, used to check what arrived on disk.
+The token's account needs read and create on "3. Resources/X", plus read, create and update on
+"3. Resources/X/my posts". X2VAULT_TEST_VAULT is the local folder the server serves, used to
+check what arrived on disk.
 """
 import contextlib
 import hashlib
@@ -18,7 +19,9 @@ import sys
 import tempfile
 import time
 import unittest
+import urllib.parse
 import urllib.request
+from datetime import datetime, timedelta, timezone
 from email.message import Message
 from pathlib import Path
 from unittest.mock import patch
@@ -26,9 +29,11 @@ from unittest.mock import patch
 from x2vault import cli
 from x2vault.export import verified
 from x2vault.store import FileStore
+from test_posts import FakeX as FakeTimeline, post as own_post
 
 ENABLED = os.environ.get("X2VAULT_TEST_SPALL") == "1"
 FOLDER, ASSETS = "3. Resources/X/inbox", "3. Resources/X/assets"
+POSTS = "3. Resources/X/my posts"
 IMAGE = b"\x89PNG\r\n\x1a\n" + bytes(range(256)) * 200
 VIDEO_SIZE = 11 * 2**20
 
@@ -106,7 +111,7 @@ class ContractTests(unittest.TestCase):
 
     def argv(self, data_dir):
         return ["--credentials", str(self.tmp / "credentials.json"), "watch", "--once", "--spall", self.url,
-                "--data-dir", str(data_dir), "--bookmarks-folder", FOLDER, "--assets-folder", ASSETS]
+                "--data-dir", str(data_dir), "--bookmarks-folder", FOLDER, "--assets-folder", ASSETS, "--no-posts"]
 
     def test_export_three_posts(self):
         base = str(int(time.time() * 1000))
@@ -144,6 +149,68 @@ class ContractTests(unittest.TestCase):
         self.assertIn(f"https://x.com/i/status/{video}", note)
         self.assertEqual([p for p in self.vault.rglob("*") if ".x2vault" in p.parts], [])
         self.assertTrue((self.tmp / "state/receipts").is_dir())
+
+    def test_own_posts_and_stats_refresh(self):
+        base = int(time.time() * 1000)
+        now = datetime.now(timezone.utc)
+        created = lambda minutes: (now - timedelta(minutes=minutes)).isoformat().replace("+00:00", "Z")
+        ids = {kind: str(base + i) for i, kind in enumerate(("post", "reply", "thread", "quote", "repost", "parent"))}
+        client = FakeTimeline([
+            own_post(ids["post"], f"Contract plain post {base}", created_at=created(50)),
+            own_post(ids["reply"], f"@alice contract reply {base}", refs=[("replied_to", ids["parent"])],
+                     reply_to="77", created_at=created(40)),
+            own_post(ids["thread"], f"@me contract thread part {base}", refs=[("replied_to", ids["post"])],
+                     reply_to="9", conversation_id=ids["post"], created_at=created(30)),
+            own_post(ids["quote"], f"Contract quote {base}", refs=[("quoted", ids["parent"])], created_at=created(20)),
+            own_post(ids["repost"], "RT @alice: something", refs=[("retweeted", ids["parent"])], created_at=created(10)),
+        ], [dict(own_post(ids["parent"], "Alice asks a question", created_at=created(60)), author_id="77")])
+        argv = ["--credentials", str(self.tmp / "credentials.json"), "posts", "--spall", self.url,
+                "--data-dir", str(self.tmp / "state"), "--posts-folder", POSTS, "--assets-folder", ASSETS]
+        log = run(argv, client)
+        self.assertIn("Reads: 5 own + 1 others ≈ $0.010", log)
+        folder = self.vault / POSTS
+        def note(post_id):
+            return next(folder.rglob(f"* - {post_id}.md"))
+        self.assertEqual(note(ids["post"]).parent, folder)
+        self.assertEqual(note(ids["quote"]).parent, folder)
+        self.assertEqual(note(ids["reply"]).parent, folder / "replies")
+        self.assertEqual(note(ids["thread"]).parent, folder / "replies")
+        self.assertEqual(list(folder.rglob(f"* - {ids['repost']}.md")), [])
+        self.assertEqual([ids for ids, _ in client.lookup_calls], [[ids["parent"]]])
+        self.assertIn("Replying to [@alice]", note(ids["reply"]).read_text())
+        self.assertIn('Type: "quote"', note(ids["quote"]).read_text())
+        self.assertIn(f'Thread: "{ids["post"]}"', note(ids["thread"]).read_text())
+        self.assertTrue((folder / "My posts.base").is_file())
+        # The base evaluates in Spall: the "Posts only" view leaves out replies.
+        request = urllib.request.Request(f"{self.url}/v1/bases/{urllib.parse.quote(POSTS)}/My%20posts.base/query",
+                                         json.dumps({"view": "Posts only"}).encode(), method="POST", headers={
+                                             "Authorization": "Bearer " + os.environ["X2VAULT_SPALL_TOKEN"],
+                                             "Content-Type": "application/json"})
+        with urllib.request.urlopen(request, timeout=30) as response:
+            rows = json.dumps(json.load(response), ensure_ascii=False)
+        self.assertIn(ids["quote"], rows)
+        self.assertNotIn(ids["reply"], rows)
+
+        # A day later: stats change, the user has edited a note, and the refresh goes through PATCH.
+        state_path = self.tmp / "state/posts-9.json"
+        state = json.loads(state_path.read_text())
+        state["stats_day"] = "2000-01-01"
+        for record in state["posts"].values():
+            record["stats_at"] = "2000-01-01T00:00:00+00:00"
+        state_path.write_text(json.dumps(state))
+        edited = note(ids["post"])
+        edited.write_text(edited.read_text() + "\nNikita's comment.\n")
+        client.own[ids["post"]]["public_metrics"]["like_count"] = 99
+        log = run(argv, client)
+        self.assertIn("Reads: 4 own + 0 others", log)
+        text = edited.read_text()
+        self.assertIn("Likes: 99", text)
+        self.assertIn("Nikita's comment.", text)
+        audit = (Path(os.environ["X2VAULT_TEST_SPALL_AUDIT"]).read_text().splitlines()
+                 if os.environ.get("X2VAULT_TEST_SPALL_AUDIT") else [])
+        patches = [line for line in audit if '"patch"' in line]
+        print(f"posts: {len(list(folder.rglob('*.md')))} notes in {POSTS}, {len(patches)} PATCH audit entries",
+              file=sys.stderr)
 
     @unittest.skipUnless(os.environ.get("X2VAULT_TEST_FIXTURE_STATE"), "set X2VAULT_TEST_FIXTURE_STATE to an existing .x2vault")
     def test_cutover_from_copied_state(self):

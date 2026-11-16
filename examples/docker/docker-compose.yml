@@ -1,9 +1,10 @@
 # x2vault in Spall mode: writes notes and media through Spall.
 # Keep secrets in a .env file next to this one (never commit it):
 #   X2VAULT_SPALL_URL=http://spall-host:8787
-#   X2VAULT_SPALL_TOKEN=spl_...      # account with [read, create] on "3. Resources/X"
-#   X2VAULT_X_CLIENT_ID=...                # your X developer app
-#   X2VAULT_X_CLIENT_SECRET=...            # only for confidential clients
+#   X2VAULT_SPALL_TOKEN=spl_...       # [read, create] on "3. Resources/X",
+#                                     # [read, create, update] on "3. Resources/X/my posts"
+#   X2VAULT_X_CLIENT_ID=...           # your X developer app
+#   X2VAULT_X_CLIENT_SECRET=...       # only for confidential clients
 # First start, then log in once (paste the redirected URL when asked):
 #   docker compose up -d
 #   docker compose exec x2vault python -m x2vault --credentials /data/credentials.json login
@@ -20,6 +21,8 @@ services:
       # X2VAULT_BOOKMARKS_FOLDER: "3. Resources/X/inbox"
       # X2VAULT_ASSETS_FOLDER: "3. Resources/X/assets"
       # X2VAULT_MAX_MEDIA_MB: "10"     # Spall's default body limit is 10 MiB
+      # X2VAULT_POSTS_FOLDER: "3. Resources/X/my posts"
+      # X2VAULT_POSTS_DAILY_READ_BUDGET: "200"   # billable X post reads per UTC day
     volumes:
       - x2vault-data:/data   # credentials.json and state/ (receipts, queue, raw JSON)
 

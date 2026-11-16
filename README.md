@@ -1,6 +1,7 @@
 # x2vault
 
-A standalone Python 3.11+ CLI for Linux/macOS. Downloads individual bookmarked posts
+A standalone Python 3.11+ CLI for Linux/macOS. Exports your X bookmarks and your own
+posts (see [Your own posts](#your-own-posts)). Downloads individual bookmarked posts
 into an Obsidian vault, including photos, available MP4 video/GIF variants, long post
 text, poll results, source links, and YAML frontmatter. No runtime dependencies.
 X Articles include their full API-provided text and available media. Threads and
@@ -199,6 +200,54 @@ systemctl --user stop x2vault.service
 User timers run while the user service manager is active. To keep them running after
 logout/start them at boot, enable user lingering with `loginctl enable-linger`.
 
+## Your own posts
+
+`watch` also exports your own posts after each bookmarks poll (`--no-posts` turns that
+off), and `posts` runs the same pass once. This only reads from X.
+
+```sh
+# First run: backfill everything X returns (up to 3,200 posts), with a raised budget.
+python3 -m x2vault posts --vault /absolute/path/to/vault --budget 1000
+```
+
+- **Where:** `--posts-folder` (`X2VAULT_POSTS_FOLDER`, default `3. Resources/X/my posts`).
+  Replies go to its `replies/` subfolder. File names are
+  `YYYY-MM-DD <first words> - <id>.md`. Media is saved like bookmark media, in the same
+  assets folder and with the same size cap.
+- **What:** posts (`Type: post`), quote posts (`Type: quote`, with the quoted post as a
+  `>` block) and replies (`Type: reply`, with the post they answer as a `>` block). A
+  reply to yourself is part of a thread: `Thread` holds the conversation ID, so a thread's
+  posts can be grouped. Plain reposts are skipped. Each note has the frontmatter `Type`,
+  `Date`, `Created`, `Lang`, `Link`, `Thread`, `Likes`, `Reposts`, `Replies`, `Quotes`,
+  `Bookmarks`, `Impressions` and `Stats updated`, then the text exactly as written
+  (long posts in full, `t.co` links expanded), media, and the parent or quoted post.
+- **Incremental:** after the backfill, each poll asks only for posts newer than the
+  newest one saved, so a poll with nothing new costs nothing.
+- **Stats:** once per UTC day, the stats of posts younger than 14 days are read again and
+  only those frontmatter keys (and `Stats updated`) are rewritten. Your other edits to the
+  note stay. After 14 days the stats are frozen. In Spall mode this uses
+  `PATCH /v1/notes/{path}`, so the Spall account needs `update` on the posts folder:
+
+  ```yaml
+  accounts:
+    x2vault:
+      access:
+        "3. Resources/X": [read, create]
+        "3. Resources/X/my posts": [read, create, update]
+  ```
+
+  Without `update`, the exporter logs a warning and skips the refresh.
+- **Cost and budget:** X charges per post returned: $0.001 for your own posts (an
+  "Owned Read" when the app belongs to you) and $0.005 for other people's posts (reply
+  parents and quoted posts, fetched in batches of up to 100). Every post returned counts
+  against `X2VAULT_POSTS_DAILY_READ_BUDGET` (default 200 per UTC day, `--budget N` on
+  `posts`). When the budget runs out, paging stops and the next day continues where it
+  left off. Each pass logs its reads and the estimated cost. Set a spending limit in the
+  X developer console as well.
+- **Base:** `My posts.base` is created in the posts folder once, if missing, with the
+  views "All" (newest first), "Top" (most likes) and "Posts only" (no replies). It is
+  never overwritten.
+
 ## Storage modes
 
 Every `export` and `watch` run needs exactly one destination:
@@ -259,7 +308,7 @@ new setup has run cleanly; it is the rollback.
 
 A multi-arch image (`linux/amd64`, `linux/arm64`) is published to
 `ghcr.io/ikaros-labs/x2vault` on every push to `main` (`latest` plus the
-full commit SHA) and on `v*` tags (semver tags). It runs `watch --interval 300` in API
+full commit SHA) and on `v*` tags (semver tags). It runs `watch --interval 300` in Spall
 mode as a non-root user (UID 10001). There is no HTTP port.
 
 `/data` is the volume: credentials in `/data/credentials.json`, state in `/data/state`.
@@ -267,13 +316,15 @@ mode as a non-root user (UID 10001). There is no HTTP port.
 | Variable | |
 |---|---|
 | `X2VAULT_SPALL_URL` | Spall base URL (required) |
-| `X2VAULT_SPALL_TOKEN` | Spall token with `[read, create]` on the folders below (required) |
+| `X2VAULT_SPALL_TOKEN` | Spall token with `[read, create]` on the folders below, plus `update` on the posts folder (required) |
 | `X2VAULT_X_CLIENT_ID` | your X developer app's client ID (required for login) |
 | `X2VAULT_X_CLIENT_SECRET` | only for confidential OAuth clients |
 | `X2VAULT_BOOKMARKS_FOLDER` | notes folder, default `3. Resources/X/inbox` |
 | `X2VAULT_ASSETS_FOLDER` | media folder, default `3. Resources/X/assets` |
 | `X2VAULT_MAX_MEDIA_MB` | media size cap, default `10` |
 | `X2VAULT_DATA_DIR` | state folder, default `/data/state` |
+| `X2VAULT_POSTS_FOLDER` | your own posts, default `3. Resources/X/my posts` |
+| `X2VAULT_POSTS_DAILY_READ_BUDGET` | billable post reads per UTC day, default `200` |
 
 ```sh
 docker run -d --name x2vault --restart unless-stopped \

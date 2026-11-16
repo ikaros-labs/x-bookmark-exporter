@@ -1,8 +1,11 @@
-"""A minimal in-memory stand-in for Spall's /v1/files endpoints."""
+"""A minimal in-memory stand-in for Spall's /v1/files endpoints and frontmatter PATCH."""
 import hashlib
+import json
 import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+from x2vault.store import set_frontmatter
 
 
 def rev(data):
@@ -14,7 +17,8 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def path_of(self):
-        return urllib.parse.unquote(urllib.parse.urlsplit(self.path).path.removeprefix("/v1/files/"))
+        path = urllib.parse.urlsplit(self.path).path
+        return urllib.parse.unquote(path.removeprefix("/v1/files/").removeprefix("/v1/notes/"))
 
     def reply(self, status, body=b"", headers=None):
         self.send_response(status)
@@ -34,6 +38,18 @@ class Handler(BaseHTTPRequestHandler):
             status = server.failures.pop(0)
             return self.reply(status, headers={"Retry-After": "7"} if status == 429 else None)
         path = self.path_of()
+        if self.command == "PATCH":
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            if path not in server.files:
+                return self.reply(404)
+            if not server.can_update:
+                return self.reply(403, b'{"error":{"code":"forbidden"}}')
+            current = server.files[path]
+            if self.headers.get("If-Match", "").strip('"') != rev(current):
+                return self.reply(412)
+            values = {op["key"]: op["value"] for op in body["ops"] if op["op"] == "frontmatter.set"}
+            server.files[path] = set_frontmatter(current.decode(), values).encode()
+            return self.reply(200, b"{}", {"ETag": f'"{rev(server.files[path])}"'})
         if self.command == "PUT":
             body = self.rfile.read(int(self.headers["Content-Length"]))
             if path in server.files:
@@ -48,19 +64,28 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(304, headers={"ETag": f'"{rev(body)}"'})
         return self.reply(200, body, {"ETag": f'"{rev(body)}"'})
 
-    do_GET = do_HEAD = do_PUT = handle_one
+    do_GET = do_HEAD = do_PUT = do_PATCH = handle_one
 
 
 class FakeSpall:
     def __init__(self):
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.server.files, self.server.failures, self.server.requests = {}, [], []
+        self.server.can_update = True
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
         threading.Thread(target=self.server.serve_forever, args=(0.05,), daemon=True).start()
 
     files = property(lambda self: self.server.files)
     failures = property(lambda self: self.server.failures)
     requests = property(lambda self: self.server.requests)
+
+    @property
+    def can_update(self):
+        return self.server.can_update
+
+    @can_update.setter
+    def can_update(self, value):
+        self.server.can_update = value
 
     def close(self):
         self.server.shutdown()

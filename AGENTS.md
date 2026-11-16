@@ -4,6 +4,7 @@
 
 Python 3.11+ CLI, Linux/macOS, standard library only at runtime. The `x2vault`
 package owns OAuth, API reads, Markdown/media export, migrations, and polling.
+`posts.py` exports your own posts (read-only on X, bounded by a daily read budget).
 The Linux systemd examples are optional; foreground commands work on macOS too.
 
 ## Commands
@@ -38,6 +39,8 @@ OAuth, migrations, or removal behavior need focused regression tests.
 - Receipt/state migrations must be restartable and keep file hashes consistent.
 - Polling persists first-seen timestamps and retry backoff and avoids unnecessary
   expanded reads. Keep manual export usable independently of the monitor.
+- Own-posts export never writes to X, never re-reads posts older than the 14-day stats
+  window, and counts every post returned against the daily budget.
 - Keep filenames deterministic, filesystem-safe, byte-length bounded, and ID-suffixed.
 
 Update README and CLI help when behavior changes. Keep changes focused; avoid adding

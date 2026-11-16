@@ -7,6 +7,7 @@ receipts (e.g. ``note.md`` or ``../assets/123/1.jpg``). Receipt entries under
 import contextlib
 import hashlib
 import http.client
+import json
 import os
 import posixpath
 import tempfile
@@ -34,6 +35,30 @@ def fsync_directory(path):
 
 class StoreError(RuntimeError):
     """A hard failure for one post; the bookmark is kept and the error recorded."""
+
+
+class UpdateForbidden(StoreError):
+    """The Spall account may create but not update notes in this folder."""
+
+
+def set_frontmatter(text, values):
+    """Set top-level frontmatter keys (JSON-encoded values), leaving every other line as it is."""
+    rendered = {key: f"{key}: {json.dumps(value, ensure_ascii=False)}" for key, value in values.items()}
+    lines = text.split("\n")
+    end = None
+    if lines[0].strip() == "---":
+        end = next((i for i in range(1, len(lines)) if lines[i].strip() in {"---", "..."}), None)
+    if end is None:
+        return "---\n" + "\n".join(rendered.values()) + "\n---\n" + text
+    for i in range(1, end):
+        line = lines[i]
+        if line[:1] in {" ", "\t", "-", "#"} or ":" not in line:
+            continue
+        key = line.split(":", 1)[0].strip().strip("'\"")
+        if key in rendered:
+            lines[i] = rendered.pop(key)
+    lines[end:end] = rendered.values()
+    return "\n".join(lines)
 
 
 class FileStore:
@@ -87,21 +112,33 @@ class FileStore:
         path = self.local(relative)
         return path.is_file() and digest(path) == expected
 
+    def update_frontmatter(self, relative, values):
+        """Atomic rewrite of only the given frontmatter keys; the user's other edits are kept."""
+        path = self.local(relative)
+        if not path.is_file():
+            raise StoreError(f"Note missing: {relative}")
+        updated = set_frontmatter(path.read_text(), values)
+        with self.staging(relative) as temp:
+            temp.write_text(updated)
+            os.replace(temp, path)
+        fsync_directory(path.parent)
+
 
 class SpallStore:
-    """Writes through Spall with a create-only token (no update or delete)."""
+    """Writes through Spall: create-only for files; frontmatter updates need `update`."""
 
     retries = 3
     rate_limit_waits = 10  # Spall limits requests per account (default 120/min)
 
-    def __init__(self, base_url, token, folder, data_dir, max_media_bytes=None, sleep=time.sleep, timeout=120):
+    def __init__(self, base_url, token, folder, data_dir, max_media_bytes=None, sleep=time.sleep, timeout=120,
+                 option="--bookmarks-folder"):
         if urllib.parse.urlsplit(base_url).scheme not in {"http", "https"}:
             raise ValueError("--spall must be an http(s) URL")
         if not token:
             raise ValueError("Set X2VAULT_SPALL_TOKEN for --spall")
-        self.base = base_url.rstrip("/") + "/v1/files/"
+        self.api = base_url.rstrip("/") + "/v1/"
         self.token = token
-        self.root = PurePosixPath("/") / vault_path(folder, "--bookmarks-folder")
+        self.root = PurePosixPath("/") / vault_path(folder, option)
         self.data_dir = Path(data_dir)
         self.max_media_bytes = max_media_bytes
         self.sleep = sleep
@@ -120,12 +157,12 @@ class SpallStore:
             raise ValueError(f"Path outside the vault or hidden: {relative}")
         return "/".join(parts)
 
-    def url(self, relative):
-        return self.base + "/".join(urllib.parse.quote(part, safe="") for part in self.vault_path(relative).split("/"))
+    def url(self, relative, kind="files"):
+        return self.api + kind + "/" + "/".join(urllib.parse.quote(part, safe="") for part in self.vault_path(relative).split("/"))
 
-    def request(self, method, relative, headers=None, body=None, ok=()):
+    def request(self, method, relative, headers=None, body=None, ok=(), kind="files"):
         """Retries network errors and 5xx; returns (status, headers) for 2xx/3xx or listed codes."""
-        url = self.url(relative)
+        url = self.url(relative, kind)
         headers = dict(headers or {}, Authorization="Bearer " + self.token)
         attempt = limited = 0
         while True:
@@ -206,6 +243,24 @@ class SpallStore:
             return True
         etag = (headers.get("ETag") or "").removeprefix("W/").strip('"')
         return status == 200 and etag == tag
+
+
+    def update_frontmatter(self, relative, values):
+        """PATCH /v1/notes/{path} with frontmatter.set ops, conditional on the current rev."""
+        body = json.dumps({"ops": [{"op": "frontmatter.set", "key": key, "value": value}
+                                   for key, value in values.items()]}).encode()
+        for _ in range(3):
+            status, headers = self.request("HEAD", relative, ok=(404,))
+            if status == 404:
+                raise StoreError(f"Note missing: {self.vault_path(relative)}")
+            status, _ = self.request("PATCH", relative, {"Content-Type": "application/json",
+                                                          "If-Match": headers.get("ETag", "")},
+                                     body, ok=(403, 412), kind="notes")
+            if status == 403:
+                raise UpdateForbidden(f"The Spall account lacks update on {self.vault_path(relative)}")
+            if status != 412:
+                return
+        raise StoreError(f"Note kept changing during the stats update: {self.vault_path(relative)}")
 
 
 def vault_path(folder, option):
