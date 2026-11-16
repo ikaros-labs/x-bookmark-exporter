@@ -66,6 +66,14 @@ class ApiStoreTests(unittest.TestCase):
         self.assertEqual(self.api.files[f"{FOLDER}/note.md"], b"body")
         self.assertEqual(self.sleeps, [2, 4])
 
+    def test_rate_limit_waits_for_retry_after(self):
+        self.api.failures.extend([429, 429])
+        self.assertTrue(self.store.create("note.md", b"body"))
+        self.assertEqual(self.sleeps, [7, 7])
+        self.api.failures.extend([429] * 11)
+        with self.assertRaisesRegex(StoreError, "HTTP 429"):
+            self.store.exists("note.md")
+
     def test_gives_up_after_retries(self):
         self.api.failures.extend([502] * 4)
         with self.assertRaisesRegex(StoreError, "HTTP 502"):

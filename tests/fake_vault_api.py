@@ -31,7 +31,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get("Authorization") != "Bearer secret":
             return self.reply(401)
         if server.failures:
-            return self.reply(server.failures.pop(0))
+            status = server.failures.pop(0)
+            return self.reply(status, headers={"Retry-After": "7"} if status == 429 else None)
         path = self.path_of()
         if self.command == "PUT":
             body = self.rfile.read(int(self.headers["Content-Length"]))

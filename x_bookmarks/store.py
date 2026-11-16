@@ -92,6 +92,7 @@ class ApiStore:
     """Writes through obsidian-api with a create-only token (no update or delete)."""
 
     retries = 3
+    rate_limit_waits = 10  # obsidian-api limits requests per account (default 120/min)
 
     def __init__(self, base_url, token, folder, data_dir, max_media_bytes=None, sleep=time.sleep, timeout=120):
         if urllib.parse.urlsplit(base_url).scheme not in {"http", "https"}:
@@ -126,7 +127,7 @@ class ApiStore:
         """Retries network errors and 5xx; returns (status, headers) for 2xx/3xx or listed codes."""
         url = self.url(relative)
         headers = dict(headers or {}, Authorization="Bearer " + self.token)
-        attempt = 0
+        attempt = limited = 0
         while True:
             stream = None
             try:
@@ -145,6 +146,14 @@ class ApiStore:
                 error.close()
                 if error.code < 400 or error.code in ok:
                     return error.code, error.headers
+                if error.code == 429 and limited < self.rate_limit_waits:
+                    limited += 1
+                    try:
+                        wait = float(error.headers.get("Retry-After", 1))
+                    except ValueError:
+                        wait = 1
+                    self.sleep(min(max(wait, 1), 120))
+                    continue
                 if error.code < 500 or attempt >= self.retries:
                     raise StoreError(f"obsidian-api returned HTTP {error.code} for {method} "
                                      f"{self.vault_path(relative)}") from None
