@@ -1,8 +1,9 @@
 """Export your own X posts: backfill, incremental since_id polls, a daily read budget and stats refresh.
 
-Reads only. Own posts cost an "Owned Read" ($0.001 each), other people's posts
-(reply parents, quoted posts) $0.005 each; every post returned counts against the
-daily budget, so a poll with nothing new costs nothing.
+Reads only. Posts returned by the own timeline (/2/users/{me}/tweets) cost an
+"Owned Read" ($0.001 each); lookups by ID (/2/tweets?ids=: reply parents, quoted
+posts) $0.005 each, even when the post is our own. Every post returned counts
+against the daily budget, so a poll with nothing new costs nothing.
 """
 import hashlib
 import html
@@ -248,8 +249,8 @@ class PostsExport:
             page = self.client.posts(batch, REFERENCED)
             users = {u["id"]: u for u in page.get("includes", {}).get("users", [])}
             data = page.get("data", [])
-            own = sum(post.get("author_id") == self.user_id for post in data)
-            self.budget.charge(own=own, others=len(data) - own)
+            # A lookup by ID is never an Owned Read, even for posts of our own.
+            self.budget.charge(others=len(data))
             for post in data:
                 user = users.get(post.get("author_id"), {})
                 found[post["id"]] = {"id": post["id"], "username": user.get("username", "i"), "text": text_of(post)}
@@ -336,32 +337,40 @@ class PostsExport:
         print(f"{post_id}: saved {relative}", flush=True)
 
     def refresh(self):
-        """Once per UTC day: re-read stats of posts younger than 14 days, then they are frozen."""
+        """Once per UTC day: re-read stats of posts younger than 14 days, then they are frozen.
+
+        Reads the own timeline (an Owned Read) from 14 days ago, not a lookup by ID.
+        """
         if self.state.get("stats_day") == self.today:
             return
         cutoff = self.now - timedelta(days=REFRESH_DAYS)
-        due = [post_id for post_id, record in self.state["posts"].items()
-               if utc(record["created"]) >= cutoff and record.get("stats_at", "")[:10] != self.today]
+        due = {post_id for post_id, record in self.state["posts"].items()
+               if utc(record["created"]) >= cutoff and record.get("stats_at", "")[:10] != self.today}
         fields = STATS if self.state.get("no_private_metrics") else PRIVATE_STATS
+        token = None
         while due:
-            count = min(100, len(due), self.budget.remaining())
-            if count < 1:
+            remaining = self.budget.remaining()
+            if remaining < 5:  # the timeline's smallest page
                 self.out_of_budget = True
                 return  # try again on a later poll
-            batch = due[:count]
+            params = dict(fields, start_time=cutoff.strftime("%Y-%m-%dT%H:%M:%SZ"), max_results=min(100, remaining))
+            if token:
+                params["pagination_token"] = token
             try:
-                page = self.client.posts(batch, fields)
+                page = self.client.timeline(self.user_id, params)
             except APIError as error:
                 if fields is STATS or error.status not in {400, 403}:
                     raise
                 print("Posts: non_public_metrics rejected; using public metrics only.", flush=True)
                 self.state["no_private_metrics"] = True
-                fields = STATS
+                fields, token = STATS, None
                 continue
             data = page.get("data", [])
             self.budget.charge(own=len(data))
             stamp = self.now.isoformat()
             for post in data:
+                if post["id"] not in due:
+                    continue  # reposts, posts not saved yet, already refreshed today
                 record = self.state["posts"][post["id"]]
                 try:
                     self.store.update_frontmatter(record["path"], dict(stats(post), **{"Stats updated": stamp}))
@@ -374,11 +383,13 @@ class PostsExport:
                 except (OSError, ValueError, RuntimeError) as error:
                     print(f"{post['id']}: warning: stats not refreshed: {error}", flush=True)
                 record["stats_at"] = stamp
-            due = due[count:]
+                due.discard(post["id"])
             self.save()
+            token = page.get("meta", {}).get("next_token")
+            if not data or not token:
+                break
         self.state["stats_day"] = self.today
         self.save()
-
 
 def export_posts(client, store, budget=200, assets_dir=None, folder=None):
     return PostsExport(client, store, budget, assets_dir, folder).run()
