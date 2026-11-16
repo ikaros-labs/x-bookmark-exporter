@@ -4,7 +4,7 @@ import time
 from datetime import datetime, timezone
 
 from .api import APIError
-from .export import process
+from .export import as_store, process
 from .storage import write_json
 
 
@@ -13,8 +13,9 @@ def read_json(path):
 
 
 def poll(client, output, vocabulary="tweet", keep=False, assets_dir=None):
+    output = as_store(output)
     user_id = client.user_id()
-    internal = output / ".x-bookmarks"
+    internal = output.data_dir
     state_path = internal / f"state-{user_id}.json"
     queue_path = internal / f"monitor-{user_id}.json"
     inventory_path = internal / f"inventory-{user_id}.json"

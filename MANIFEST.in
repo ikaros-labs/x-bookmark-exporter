@@ -1,6 +1,7 @@
 include AGENTS.md CONTRIBUTING.md SECURITY.md
 include .env.example
-recursive-include examples/systemd *.service *.timer
+recursive-include examples *.service *.timer *.yml
+include Dockerfile .dockerignore
 recursive-include tests *.py
 prune test-vault
 prune exports

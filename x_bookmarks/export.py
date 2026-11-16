@@ -12,11 +12,16 @@ from pathlib import Path
 from .storage import atomic_write, write_json
 from .naming import filename
 from .articles import article_text, media_keys
+from .store import INTERNAL, FileStore, digest
 
 
-def digest(path):
-    with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
+class MediaTooLarge(ValueError):
+    pass
+
+
+def as_store(output):
+    """Accept a notes folder path (file mode, as before) or a store."""
+    return output if hasattr(output, "create") else FileStore(output)
 
 
 def media_source(media):
@@ -31,7 +36,11 @@ def media_source(media):
     raise ValueError("Media has no downloadable photo or MP4")
 
 
-def download(url, path):
+def too_large(limit):
+    return MediaTooLarge(f"larger than the {limit / 2**20:g} MB media limit")
+
+
+def download(url, path, limit=None):
     if urllib.parse.urlsplit(url).scheme != "https":
         raise ValueError("Media URL must use HTTPS")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -45,11 +54,15 @@ def download(url, path):
                 content_type = response.headers.get_content_type()
                 if not content_type.startswith(("image/", "video/", "application/octet-stream")):
                     raise ValueError("Media response is not an image or video")
+                expected = response.headers.get("Content-Length")
+                if limit is not None and expected is not None and int(expected) > limit:
+                    raise too_large(limit)
                 total = 0
                 while chunk := response.read(1024 * 1024):
                     stream.write(chunk)
                     total += len(chunk)
-                expected = response.headers.get("Content-Length")
+                    if limit is not None and total > limit:
+                        raise too_large(limit)
                 if not total or (expected is not None and total != int(expected)):
                     raise ValueError("Empty or incomplete media download")
             stream.flush()
@@ -118,14 +131,15 @@ def render(item, media_links):
 
 
 def archive(item, output, assets_dir=None):
+    store = as_store(output)
     post = item["post"]
     post_id = post["id"]
     if not re.fullmatch(r"[0-9]+", post_id):
         raise ValueError("Invalid post ID")
-    receipt = output / f".x-bookmarks/receipts/{post_id}.json"
+    receipt = store.data_dir / f"receipts/{post_id}.json"
     if receipt.exists():
         files = json.loads(receipt.read_text())
-        if verified(output, files):
+        if verified(store, files):
             return files
     article = post.get("article")
     warnings = list(item.get("export_warnings", []))
@@ -143,47 +157,66 @@ def archive(item, output, assets_dir=None):
         if poll_id not in polls:
             warnings.append(f"Poll {poll_id} unavailable")
     media = {m["media_key"]: m for m in item["includes"].get("media", [])}
-    links, files = [], []
+    links, files, hashes = [], [], {}
     try:
         keys = media_keys(post)
     except ValueError:
         keys = []
         warnings.append("Media references unavailable")
     for index, key in enumerate(keys, 1):
+        source = None
         try:
             if key not in media:
                 raise ValueError("Attached media missing from API response")
             source, extension = media_source(media[key])
-            destination = (assets_dir if assets_dir is not None else output / "assets") / post_id / f"{index}{extension}"
-            relative = Path(os.path.relpath(destination, output)).as_posix()
-            download(source, destination)
+            destination = (assets_dir if assets_dir is not None else store.root / "assets") / post_id / f"{index}{extension}"
+            relative = Path(os.path.relpath(destination, store.root)).as_posix()
+            limit = {"limit": store.max_media_bytes} if store.max_media_bytes is not None else {}
+            with store.staging(relative) as temp:
+                download(source, temp, **limit)
+                hashes[relative] = store.create(relative, temp)
             files.append(relative)
             links.append((relative, media[key].get("alt_text", "")))
+        except MediaTooLarge as error:
+            warnings.append(f"Media {key} skipped: {error}; view it on the original post ({source})")
+            print(f"{post_id}: warning: media {key} skipped: {error} ({source})", flush=True)
         except (OSError, ValueError) as error:
+            # StoreError (vault write failed) is not caught here: the post fails and the bookmark is kept.
             warnings.append(f"Media {key} unavailable: {error}")
     item = dict(item, export_warnings=warnings)
     relative = filename(item)
-    if (output / relative).exists():
+    if store.exists(relative):
         raise ValueError(f"Untracked note already exists: {relative}; refusing to overwrite")
     # Publish the note only after all available content and omissions are accounted for.
     body = render(item, links)
-    raw = f".x-bookmarks/raw/{post_id}.json"
-    write_json(output / raw, item)
+    raw = f"{INTERNAL}raw/{post_id}.json"
+    write_json(store.data_dir / raw.removeprefix(INTERNAL), item)
     files.extend([raw, relative])
-    hashes = {name: digest(output / name) for name in files if name != relative}
+    hashes[raw] = digest(store.data_dir / raw.removeprefix(INTERNAL))
     hashes[relative] = hashlib.sha256(body.encode()).hexdigest()
+    hashes = {name: hashes[name] for name in files}
     # Receipt precedes note publication: recover a crash between note and state writes.
     write_json(receipt, hashes)
-    atomic_write(output / relative, body.encode())
+    with store.staging(relative) as temp:
+        atomic_write(temp, body.encode())
+        store.create(relative, temp)
     return hashes
 
 
 def verified(output, files):
-    return bool(files) and all((output / name).is_file() and digest(output / name) == expected
-                               for name, expected in files.items())
+    """Every receipt entry must match: internal files locally, the rest through the store."""
+    store = as_store(output)
+
+    def check(name, expected):
+        if name.startswith(INTERNAL):
+            local = store.data_dir / name.removeprefix(INTERNAL)
+            return local.is_file() and digest(local) == expected
+        return store.verify(name, expected)
+    return bool(files) and all(check(name, expected) for name, expected in files.items())
 
 
 def process(client, user_id, items, output, state, state_path, keep=False, assets_dir=None):
+    output = as_store(output)
     failed = 0
     for post_id, item in items.items():
         record = state.setdefault(post_id, {})
