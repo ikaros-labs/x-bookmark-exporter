@@ -31,7 +31,8 @@ def post(post_id, text="Hello world", days_ago=100, refs=(), reply_to=None, like
 
 
 class FakeX:
-    """The own-posts timeline (newest first, since_id/until_id/max_results) and batch lookups."""
+    """The own-posts timeline (newest first, since_id/until_id/start_time/max_results/pagination_token)
+    and batch lookups."""
 
     def __init__(self, own, others=()):
         self.own = {p["id"]: p for p in own}
@@ -47,13 +48,21 @@ class FakeX:
 
     def timeline(self, user_id, params):
         self.timeline_calls.append(dict(params))
+        if self.reject_private and "non_public_metrics" in params.get("tweet.fields", ""):
+            raise APIError(400)
         ids = sorted((int(i) for i in self.own), reverse=True)
         ids = [i for i in ids if i > int(params.get("since_id", 0)) and i < int(params.get("until_id", 10**20))]
-        page = [self.own[str(i)] for i in ids[:params["max_results"]]]
+        if "start_time" in params:
+            ids = [i for i in ids if self.own[str(i)]["created_at"] >= params["start_time"]]
+        offset = int(params.get("pagination_token", 0))
+        page = [self.own[str(i)] for i in ids[offset:offset + params["max_results"]]]
         meta = {"result_count": len(page)}
-        if len(ids) > len(page):
-            meta["next_token"] = "more"
+        if len(ids) > offset + len(page):
+            meta["next_token"] = str(offset + len(page))
         return {"data": page, "meta": meta} if page else {"meta": meta}
+
+    def refresh_calls(self):
+        return [c for c in self.timeline_calls if "start_time" in c]
 
     def posts(self, ids, params):
         self.lookup_calls.append((list(ids), dict(params)))
@@ -138,6 +147,14 @@ class PostsTests(unittest.TestCase):
         self.assertIn('Link: "https://x.com/me/status/2"', note)
         self.assertIn("Replying to [@me](https://x.com/me/status/1):\n\n> Thread start\n", note)
 
+    def test_lookup_of_own_post_is_charged_as_others(self):
+        # Quoting an old post of our own that is not saved locally: /2/tweets?ids= is never an Owned Read.
+        client = FakeX([post(2, "See this", refs=[("quoted", 1)])], [post(1, "Ancient")])
+        log = self.run_export(client)
+        self.assertEqual([ids for ids, _ in client.lookup_calls], [["1"]])
+        self.assertIn("1 own + 1 others ≈ $0.006", log)
+        self.assertEqual(self.state()["budget"], {"day": "2026-11-16", "own": 1, "others": 1})
+
     def test_unavailable_parent_still_saves_reply(self):
         client = FakeX([post(1, "@ghost hi", refs=[("replied_to", 404)], reply_to="66")])
         self.run_export(client)
@@ -180,10 +197,18 @@ class PostsTests(unittest.TestCase):
         old_before = (self.root / "2026-10-27 Old post - 1.md").read_text()
         client.own["2"]["public_metrics"]["like_count"] = 42
         client.own["2"]["non_public_metrics"] = {"impression_count": 9000}
+        client.own["3"] = dict(post(3, "RT @alice: theirs", days_ago=0, refs=[("retweeted", 5)]))
+        client.timeline_calls.clear()
         tomorrow = NOW + timedelta(days=1)
-        self.run_export(client, now=tomorrow)
-        self.assertEqual([ids for ids, _ in client.lookup_calls], [["2"]])
-        self.assertIn("non_public_metrics", client.lookup_calls[0][1]["tweet.fields"])
+        log = self.run_export(client, now=tomorrow)
+        self.assertEqual(client.lookup_calls, [])  # never /2/tweets?ids= for stats
+        refresh = client.refresh_calls()
+        self.assertEqual(len(refresh), 1)
+        self.assertEqual(refresh[0]["start_time"], "2026-11-03T12:00:00Z")
+        self.assertIn("non_public_metrics", refresh[0]["tweet.fields"])
+        # Refresh returns posts 3 (a repost, not in state) and 2; the since_id pass returns 3 again. All own.
+        self.assertIn("3 own + 0 others ≈ $0.003", log)
+        self.assertNotIn("3", self.state()["posts"])
         updated = fresh.read_text()
         self.assertIn("Likes: 42\n", updated)
         self.assertIn("Impressions: 9000\n", updated)
@@ -193,10 +218,13 @@ class PostsTests(unittest.TestCase):
         self.assertEqual((self.root / "2026-10-27 Old post - 1.md").read_text(), old_before)
         # Once per UTC day; frozen after 14 days.
         self.run_export(client, now=tomorrow + timedelta(hours=1))
+        self.assertEqual(len(client.refresh_calls()), 1)
         self.run_export(client, now=NOW + timedelta(days=10))  # 13 days old: still refreshed
-        self.assertEqual(len(client.lookup_calls), 2)
-        self.run_export(client, now=NOW + timedelta(days=12))  # 15 days old: frozen
-        self.assertEqual(len(client.lookup_calls), 2)
+        self.assertEqual(len(client.refresh_calls()), 2)
+        self.assertIn(f'Stats updated: "{(NOW + timedelta(days=10)).isoformat()}"', fresh.read_text())
+        self.run_export(client, now=NOW + timedelta(days=12))  # 15 days old: frozen, no request
+        self.assertEqual(len(client.refresh_calls()), 2)
+        self.assertEqual(client.lookup_calls, [])
 
     def test_refresh_falls_back_when_private_metrics_rejected(self):
         client = FakeX([post(2, "Fresh", days_ago=1)])
@@ -204,8 +232,22 @@ class PostsTests(unittest.TestCase):
         client.reject_private = True
         log = self.run_export(client, now=NOW + timedelta(days=1))
         self.assertIn("non_public_metrics rejected", log)
-        self.assertEqual(client.lookup_calls[-1][1]["tweet.fields"], "id,public_metrics")
+        self.assertEqual(client.refresh_calls()[-1]["tweet.fields"], "id,public_metrics")
+        self.assertEqual(client.lookup_calls, [])
         self.assertTrue(self.state()["no_private_metrics"])
+
+    def test_refresh_paginates_and_stops_when_all_due_are_read(self):
+        client = FakeX([post(100 + i, f"Post {i}", days_ago=5) for i in range(150)]
+                       + [post(10, "Old", days_ago=30)])
+        self.run_export(client)
+        client.timeline_calls.clear()
+        log = self.run_export(client, now=NOW + timedelta(days=1))
+        refresh = client.refresh_calls()
+        self.assertEqual([c.get("pagination_token") for c in refresh], [None, "100"])
+        self.assertEqual(client.lookup_calls, [])
+        self.assertIn("150 own + 0 others ≈ $0.150", log)
+        self.assertEqual({r["stats_at"][:10] for r in self.state()["posts"].values() if r["created"] > "2026-11"},
+                         {"2026-11-17"})
 
     def test_base_created_once_and_never_overwritten(self):
         client = FakeX([post(1)])

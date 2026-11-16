@@ -223,8 +223,9 @@ python3 -m x2vault posts --vault /absolute/path/to/vault --budget 1000
   (long posts in full, `t.co` links expanded), media, and the parent or quoted post.
 - **Incremental:** after the backfill, each poll asks only for posts newer than the
   newest one saved, so a poll with nothing new costs nothing.
-- **Stats:** once per UTC day, the stats of posts younger than 14 days are read again and
-  only those frontmatter keys (and `Stats updated`) are rewritten. Your other edits to the
+- **Stats:** once per UTC day, the stats of posts younger than 14 days are read again from
+  your own timeline (`start_time` 14 days back, an Owned Read) and only those frontmatter
+  keys (and `Stats updated`) are rewritten. Your other edits to the
   note stay. After 14 days the stats are frozen. In Spall mode this uses
   `PATCH /v1/notes/{path}`, so the Spall account needs `update` on the posts folder:
 
@@ -237,9 +238,10 @@ python3 -m x2vault posts --vault /absolute/path/to/vault --budget 1000
   ```
 
   Without `update`, the exporter logs a warning and skips the refresh.
-- **Cost and budget:** X charges per post returned: $0.001 for your own posts (an
-  "Owned Read" when the app belongs to you) and $0.005 for other people's posts (reply
-  parents and quoted posts, fetched in batches of up to 100). Every post returned counts
+- **Cost and budget:** X charges per post returned: $0.001 for posts read from your own
+  timeline (an "Owned Read" when the app belongs to you) and $0.005 for posts looked up
+  by ID (reply parents and quoted posts, fetched in batches of up to 100), even when they
+  are your own. Every post returned counts
   against `X2VAULT_POSTS_DAILY_READ_BUDGET` (default 200 per UTC day, `--budget N` on
   `posts`). When the budget runs out, paging stops and the next day continues where it
   left off. Each pass logs its reads and the estimated cost. Set a spending limit in the
