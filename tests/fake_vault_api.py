@@ -1,4 +1,4 @@
-"""A minimal in-memory stand-in for obsidian-api's /v1/files endpoints."""
+"""A minimal in-memory stand-in for Spall's /v1/files endpoints."""
 import hashlib
 import threading
 import urllib.parse

@@ -1,6 +1,6 @@
-# x-bookmark-exporter in API mode: writes notes and media through obsidian-api.
+# x-bookmark-exporter in API mode: writes notes and media through Spall.
 # Keep secrets in a .env file next to this one (never commit it):
-#   X_VAULT_API_URL=http://obsidian-api-host:8787
+#   X_VAULT_API_URL=http://spall-host:8787
 #   X_VAULT_API_TOKEN=vlt_...      # account with [read, create] on "3. Resources/X"
 #   X_CLIENT_ID=...                # your X developer app
 #   X_CLIENT_SECRET=...            # only for confidential clients
@@ -19,7 +19,7 @@ services:
       # Defaults baked into the image; override if your vault is laid out differently:
       # X_BOOKMARK_FOLDER: "3. Resources/X/inbox"
       # X_BOOKMARK_ASSETS_FOLDER: "3. Resources/X/assets"
-      # X_BOOKMARK_MAX_MEDIA_MB: "10"     # obsidian-api's default body limit is 10 MiB
+      # X_BOOKMARK_MAX_MEDIA_MB: "10"     # Spall's default body limit is 10 MiB
     volumes:
       - x-bookmarks-data:/data   # credentials.json and state/ (receipts, queue, raw JSON)
 

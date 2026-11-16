@@ -27,7 +27,7 @@ def positive_number(value):
 def add_target(command, api=True):
     target = command.add_mutually_exclusive_group()
     target.add_argument("--vault", type=Path, help="Local vault folder (file mode)")
-    target.add_argument("--vault-api", metavar="URL", help="obsidian-api base URL (API mode; token from X_VAULT_API_TOKEN; "
+    target.add_argument("--vault-api", metavar="URL", help="Spall base URL (API mode; token from X_VAULT_API_TOKEN; "
                         "also X_VAULT_API_URL)" if api else "Not supported: migrate is file-mode only")
     command.add_argument("--folder", default=FOLDER,
                          help="Notes folder relative to the vault (default: X); also X_BOOKMARK_FOLDER")

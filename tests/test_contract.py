@@ -1,4 +1,4 @@
-"""Opt-in contract tests against a real obsidian-api server. No X API calls are made.
+"""Opt-in contract tests against a real Spall server. No X API calls are made.
 
     XBM_API_CONTRACT=1 XBM_API_URL=http://127.0.0.1:18787 XBM_API_TOKEN=vlt_... \\
     XBM_API_VAULT=/path/to/the/served/vault [XBM_FIXTURE_STATE=/path/to/inbox/.x-bookmarks] \\
@@ -75,7 +75,7 @@ def run(argv, client):
     log = io.StringIO()
     real = urllib.request.urlopen
     def urlopen(url, timeout):
-        # Media hosts are faked; obsidian-api requests (Request objects) go to the real server.
+        # Media hosts are faked; Spall requests (Request objects) go to the real server.
         return FakeMedia(url) if isinstance(url, str) and url.startswith("https://media.example/") else real(url, timeout=timeout)
     with patch.object(sys, "argv", ["x-bookmarks", *argv]), patch("x_bookmarks.cli.Client", return_value=client), \
             patch("urllib.request.urlopen", side_effect=urlopen), \
