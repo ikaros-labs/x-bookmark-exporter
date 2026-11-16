@@ -2,7 +2,7 @@
 
 ## Project
 
-Python 3.11+ CLI, Linux/macOS, standard library only at runtime. The `x_bookmarks`
+Python 3.11+ CLI, Linux/macOS, standard library only at runtime. The `x2vault`
 package owns OAuth, API reads, Markdown/media export, migrations, and polling.
 The Linux systemd examples are optional; foreground commands work on macOS too.
 
@@ -10,7 +10,7 @@ The Linux systemd examples are optional; foreground commands work on macOS too.
 
 ```sh
 python3 -m unittest discover -s tests -v
-python3 -m x_bookmarks --help
+python3 -m x2vault --help
 ```
 
 Use synthetic fixtures and mock API/media calls. Tests must not use real credentials,
@@ -22,7 +22,7 @@ OAuth, migrations, or removal behavior need focused regression tests.
 - Never commit tokens, secrets, OAuth callback URLs containing codes, `.env` files,
   `service.env`, credentials JSON, personal vaults, inventories, or downloaded media.
 - Credentials belong outside the repo/vault, normally in
-  `~/.config/x-bookmark-exporter/credentials.json`, and must remain owner-readable only.
+  `~/.config/x2vault/credentials.json`, and must remain owner-readable only.
 - Never log authorization headers, refresh/access tokens, client secrets, or raw
   OAuth token responses. Do not send API authorization headers to media hosts.
 - Before publishing, inspect the explicit staged-file list. Keep private exports

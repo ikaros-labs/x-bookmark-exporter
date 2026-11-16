@@ -4,10 +4,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from x_bookmarks.export import archive, verified
-from x_bookmarks.monitor import watch
-from x_bookmarks.naming import filename
-from x_bookmarks.paths import assets_directory
+from x2vault.export import archive, verified
+from x2vault.monitor import watch
+from x2vault.naming import filename
+from x2vault.paths import assets_directory
 
 
 class AssetsTests(unittest.TestCase):
@@ -30,7 +30,7 @@ class AssetsTests(unittest.TestCase):
 
     def test_shared_folder_links_hashes_and_retry(self):
         target = assets_directory(self.vault, self.output, 'Attachments/X media')
-        with patch('x_bookmarks.export.download', side_effect=self.download) as fetch:
+        with patch('x2vault.export.download', side_effect=self.download) as fetch:
             files = archive(self.item, self.output, assets_dir=target)
             self.assertEqual(archive(self.item, self.output, assets_dir=self.vault/'Other'), files)
         fetch.assert_called_once()
@@ -60,7 +60,7 @@ class AssetsTests(unittest.TestCase):
         client.user_id.return_value = '9'
         client.inventory.return_value = {'123': self.item}
         client.lookup.return_value = self.item
-        with patch('x_bookmarks.export.download', side_effect=self.download):
+        with patch('x2vault.export.download', side_effect=self.download):
             watch(client, self.output, once=True, assets_dir=target)
         self.assertTrue((target/'123/1.jpg').exists())
         state = json.loads((self.output/'.x-bookmarks/state-9.json').read_text())

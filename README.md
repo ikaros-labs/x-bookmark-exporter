@@ -1,4 +1,4 @@
-# X bookmark exporter
+# x2vault
 
 A standalone Python 3.11+ CLI for Linux/macOS. Downloads individual bookmarked posts
 into an Obsidian vault, including photos, available MP4 video/GIF variants, long post
@@ -18,15 +18,15 @@ and API credits are required. This project is not affiliated with X or Obsidian.
 ## Install
 
 ```sh
-git clone https://github.com/ikaros-labs/x-bookmark-exporter.git
-cd x-bookmark-exporter
+git clone https://github.com/ikaros-labs/x2vault.git
+cd x2vault
 python3 -m venv .venv
 .venv/bin/pip install .
-.venv/bin/x-bookmarks --help
+.venv/bin/x2vault --help
 ```
 
-The examples below run directly from the checkout with `python3 -m x_bookmarks`.
-You can instead use the installed `.venv/bin/x-bookmarks` command. No PyPI release
+The examples below run directly from the checkout with `python3 -m x2vault`.
+You can instead use the installed `.venv/bin/x2vault` command. No PyPI release
 is required.
 
 ## Setup
@@ -45,15 +45,16 @@ needed. The scopes are `tweet.read users.read bookmark.read bookmark.write offli
 Run directly from this project; installation is optional:
 
 ```sh
-cd ~/x-bookmark-exporter
-python3 -m x_bookmarks login --client-id YOUR_CLIENT_ID
+cd ~/x2vault
+python3 -m x2vault login --client-id YOUR_CLIENT_ID
 ```
 
 Authorize in your browser, then paste the full redirected URL into the local CLI
 prompt promptly (authorization codes are short lived). A localhost connection error
 is expected: this CLI does not run a callback server. Do not paste the URL into chat.
 Tokens are stored with owner-only file permissions in
-`~/.config/x-bookmark-exporter/credentials.json`, outside the vault. Refresh tokens
+`~/.config/x2vault/credentials.json`, outside the vault (an existing
+`~/.config/x-bookmark-exporter/credentials.json` is still used if the new file is absent). Refresh tokens
 are updated automatically. `--credentials PATH` before the subcommand selects a
 different credentials file.
 
@@ -61,13 +62,13 @@ different credentials file.
 
 ```sh
 # Save all accessible bookmarks; remove each after its files are verified.
-python3 -m x_bookmarks export --vault /absolute/path/to/vault
+python3 -m x2vault export --vault /absolute/path/to/vault
 
 # Optional small first run that leaves bookmarks in place.
-python3 -m x_bookmarks export --vault /absolute/path/to/vault --limit 5 --keep-bookmarks
+python3 -m x2vault export --vault /absolute/path/to/vault --limit 5 --keep-bookmarks
 
 # Choose another destination folder inside the vault.
-python3 -m x_bookmarks export --vault /absolute/path/to/vault --folder Inbox/X
+python3 -m x2vault export --vault /absolute/path/to/vault --folder Inbox/X
 ```
 
 Output:
@@ -100,7 +101,7 @@ Existing verified ID-only notes migrate automatically before an export. To renam
 them without connecting to X or removing any bookmarks:
 
 ```sh
-python3 -m x_bookmarks migrate --vault /absolute/path/to/vault
+python3 -m x2vault migrate --vault /absolute/path/to/vault
 ```
 
 Migration updates receipts and verification state and can resume after interruption.
@@ -129,8 +130,8 @@ By default, media is saved under `assets/POST_ID/` inside the notes folder, such
 `vault/X/assets/123/1.jpg`. To use a shared vault attachment directory:
 
 ```sh
-python3 -m x_bookmarks export --vault /path/to/vault --assets-folder Attachments/X
-python3 -m x_bookmarks watch --vault /path/to/vault --assets-folder "Attachments/X media"
+python3 -m x2vault export --vault /path/to/vault --assets-folder Attachments/X
+python3 -m x2vault watch --vault /path/to/vault --assets-folder "Attachments/X media"
 ```
 
 An explicit `--assets-folder` is relative to the **vault root**, independently of
@@ -140,7 +141,7 @@ directories are rejected. Local embeds and verification records point to the cho
 location. Shared folders outside the notes directory use relative Markdown embeds.
 
 You can also set `X_BOOKMARK_ASSETS_FOLDER`; the command-line flag takes precedence.
-For the systemd service, add that variable to `~/.config/x-bookmark-exporter/service.env`.
+For the systemd service, add that variable to `~/.config/x2vault/service.env`.
 The service reads it on its next cycle. No value preserves the existing default.
 
 This setting applies to **new exports**. Existing notes, media, and receipts are
@@ -151,7 +152,7 @@ and `.x-bookmarks` state.
 ## Continuous monitoring
 
 ```sh
-python3 -m x_bookmarks watch --vault /absolute/path/to/vault
+python3 -m x2vault watch --vault /absolute/path/to/vault
 ```
 
 Polls immediately, then every five minutes after the previous cycle completes.
@@ -169,31 +170,31 @@ The regular `export` command ignores monitor retry schedules for manual retries.
 
 On Linux, the templates in [`examples/systemd/`](examples/systemd/) run a cycle every five minutes without
 overlap, with logs in the journal. The example expects the checkout at
-`~/x-bookmark-exporter` and Python 3.11+ at `/usr/bin/python3`; adjust
+`~/x2vault` and Python 3.11+ at `/usr/bin/python3`; adjust
 `WorkingDirectory` and `ExecStart` if needed. Configure your destination using
 `X_BOOKMARK_VAULT` in the local environment file. That directory receives an `X/`
 subdirectory. Changing directories does not move existing exports or their state.
 
 ```sh
-mkdir -p ~/.config/systemd/user ~/.config/x-bookmark-exporter
+mkdir -p ~/.config/systemd/user ~/.config/x2vault
 # For a new configuration only; preserve any existing local secrets/settings.
-cp -n .env.example ~/.config/x-bookmark-exporter/service.env
-chmod 600 ~/.config/x-bookmark-exporter/service.env
+cp -n .env.example ~/.config/x2vault/service.env
+chmod 600 ~/.config/x2vault/service.env
 # Edit service.env and set X_BOOKMARK_VAULT to your real absolute vault path.
-cp examples/systemd/x-bookmarks.service examples/systemd/x-bookmarks.timer ~/.config/systemd/user/
+cp examples/systemd/x2vault.service examples/systemd/x2vault.timer ~/.config/systemd/user/
 systemctl --user daemon-reload
-systemctl --user enable --now x-bookmarks.timer
-systemctl --user start --no-block x-bookmarks.service
-journalctl --user -u x-bookmarks.service -f
+systemctl --user enable --now x2vault.timer
+systemctl --user start --no-block x2vault.service
+journalctl --user -u x2vault.service -f
 ```
 
 If your OAuth client needs `X_CLIENT_SECRET`, set it in the owner-readable file
-`~/.config/x-bookmark-exporter/service.env` as `X_CLIENT_SECRET=...`.
+`~/.config/x2vault/service.env` as `X_CLIENT_SECRET=...`.
 Stop both timer and current cycle with:
 
 ```sh
-systemctl --user disable --now x-bookmarks.timer
-systemctl --user stop x-bookmarks.service
+systemctl --user disable --now x2vault.timer
+systemctl --user stop x2vault.service
 ```
 
 User timers run while the user service manager is active. To keep them running after
@@ -216,8 +217,8 @@ Every `export` and `watch` run needs exactly one destination:
 
 ```sh
 export X_VAULT_API_TOKEN=vlt_...   # account with [read, create] on "3. Resources/X"
-python3 -m x_bookmarks watch --vault-api http://127.0.0.1:8787 \
-  --data-dir ~/.local/state/x-bookmarks \
+python3 -m x2vault watch --vault-api http://127.0.0.1:8787 \
+  --data-dir ~/.local/state/x2vault \
   --folder "3. Resources/X/inbox" --assets-folder "3. Resources/X/assets"
 ```
 
@@ -258,7 +259,7 @@ new setup has run cleanly; it is the rollback.
 ## Docker
 
 A multi-arch image (`linux/amd64`, `linux/arm64`) is published to
-`ghcr.io/ikaros-labs/x-bookmark-exporter` on every push to `main` (`latest` plus the
+`ghcr.io/ikaros-labs/x2vault` on every push to `main` (`latest` plus the
 full commit SHA) and on `v*` tags (semver tags). It runs `watch --interval 300` in API
 mode as a non-root user (UID 10001). There is no HTTP port.
 
@@ -276,17 +277,17 @@ mode as a non-root user (UID 10001). There is no HTTP port.
 | `X_BOOKMARK_DATA_DIR` | state folder, default `/data/state` |
 
 ```sh
-docker run -d --name x-bookmarks --restart unless-stopped \
+docker run -d --name x2vault --restart unless-stopped \
   -e X_VAULT_API_URL=http://spall-host:8787 -e X_VAULT_API_TOKEN=vlt_... \
   -e X_CLIENT_ID=... -v x-bookmarks-data:/data \
-  ghcr.io/ikaros-labs/x-bookmark-exporter:latest
+  ghcr.io/ikaros-labs/x2vault:latest
 # One-time login: open the printed URL, then paste the redirected URL.
-docker exec -it x-bookmarks python -m x_bookmarks --credentials /data/credentials.json login
+docker exec -it x2vault python -m x2vault --credentials /data/credentials.json login
 ```
 
 With compose, use [`examples/docker/docker-compose.yml`](examples/docker/docker-compose.yml)
 (`docker compose up -d`, then the same login command via `docker compose exec`). To
-build locally instead: `docker build -t x-bookmarks .`.
+build locally instead: `docker build -t x2vault .`.
 
 Until credentials exist, the container waits and checks again every minute, and it
 reports healthy while it waits for login. After that, the `HEALTHCHECK` reports
@@ -340,15 +341,15 @@ References: [bookmarks](https://docs.x.com/x-api/users/get-bookmarks),
 
 ```sh
 python3 -m unittest discover -s tests -v
-python3 -m x_bookmarks --help
+python3 -m x2vault --help
 ```
 
-Optional installation in a virtual environment exposes the `x-bookmarks` command:
+Optional installation in a virtual environment exposes the `x2vault` command:
 
 ```sh
 python3 -m venv .venv
 .venv/bin/pip install -e .
-.venv/bin/x-bookmarks --help
+.venv/bin/x2vault --help
 ```
 
 ## Privacy and security

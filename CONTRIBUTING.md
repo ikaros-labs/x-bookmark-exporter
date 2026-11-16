@@ -10,7 +10,7 @@ The project uses Python 3.11+ with no runtime dependencies. Run:
 
 ```sh
 python3 -m unittest discover -s tests -v
-python3 -m x_bookmarks --help
+python3 -m x2vault --help
 ```
 
 Keep README examples and CLI help in sync. Changes to deletion or partial exports

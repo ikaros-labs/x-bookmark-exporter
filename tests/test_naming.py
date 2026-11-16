@@ -5,10 +5,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from x_bookmarks.export import digest, render, verified
-from x_bookmarks.migration import migrate
-from x_bookmarks.naming import filename
-from x_bookmarks.storage import atomic_write, write_json
+from x2vault.export import digest, render, verified
+from x2vault.migration import migrate
+from x2vault.naming import filename
+from x2vault.storage import atomic_write, write_json
 
 
 class NamingTests(unittest.TestCase):
@@ -72,7 +72,7 @@ class NamingTests(unittest.TestCase):
             if path.name == "state-9.json":
                 raise OSError("interruption")
             real_write(path, value)
-        with patch("x_bookmarks.migration.write_json", side_effect=fail_state):
+        with patch("x2vault.migration.write_json", side_effect=fail_state):
             with self.assertRaises(OSError):
                 migrate(self.output)
         migrate(self.output)
