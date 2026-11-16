@@ -272,8 +272,9 @@ docker exec -it x-bookmarks python -m x_bookmarks --credentials /data/credential
 Until credentials exist, the container waits and checks again every minute. Defaults
 baked into the image: `X_BOOKMARK_FOLDER="3. Resources/X/inbox"`,
 `X_BOOKMARK_ASSETS_FOLDER="3. Resources/X/assets"`, `X_BOOKMARK_DATA_DIR=/data/state`.
-Set `X_CLIENT_SECRET` for confidential clients. The `HEALTHCHECK` reports unhealthy when
-no poll has succeeded for 15 minutes. To carry over existing credentials and state
+Set `X_CLIENT_SECRET` for confidential clients. The container reports healthy while it
+waits for login (no `/data/credentials.json` yet); after that, the `HEALTHCHECK` reports
+unhealthy when no poll has succeeded for 15 minutes. To carry over existing credentials and state
 instead of logging in again, copy `credentials.json` to `/data/` and the old
 `.x-bookmarks` contents (without `lock`) to `/data/state/`, owned by UID 10001.
 See [`examples/docker/docker-compose.yml`](examples/docker/docker-compose.yml).
