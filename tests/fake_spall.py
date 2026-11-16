@@ -51,7 +51,7 @@ class Handler(BaseHTTPRequestHandler):
     do_GET = do_HEAD = do_PUT = handle_one
 
 
-class FakeVaultAPI:
+class FakeSpall:
     def __init__(self):
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.server.files, self.server.failures, self.server.requests = {}, [], []

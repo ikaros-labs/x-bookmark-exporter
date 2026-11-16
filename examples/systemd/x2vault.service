@@ -4,7 +4,7 @@ Description=Export new X bookmarks into the vault
 [Service]
 Type=oneshot
 WorkingDirectory=%h/x2vault
-ExecStart=/usr/bin/python3 -u -m x2vault watch --once --vault ${X_BOOKMARK_VAULT}
+ExecStart=/usr/bin/python3 -u -m x2vault watch --once --vault ${X2VAULT_VAULT}
 EnvironmentFile=-%h/.config/x2vault/service.env
 TimeoutStartSec=infinity
 UMask=0077

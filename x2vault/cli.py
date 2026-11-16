@@ -12,9 +12,9 @@ from .storage import write_json
 from .migration import migrate
 from .monitor import watch
 from .paths import assets_directory
-from .store import ApiStore, FileStore, vault_path
+from .store import SpallStore, FileStore, vault_path
 
-FOLDER = os.environ.get("X_BOOKMARK_FOLDER", "X")
+FOLDER = os.environ.get("X2VAULT_BOOKMARKS_FOLDER", "X")
 
 
 def positive_number(value):
@@ -27,31 +27,22 @@ def positive_number(value):
 def add_target(command, api=True):
     target = command.add_mutually_exclusive_group()
     target.add_argument("--vault", type=Path, help="Local vault folder (file mode)")
-    target.add_argument("--vault-api", metavar="URL", help="Spall base URL (API mode; token from X_VAULT_API_TOKEN; "
-                        "also X_VAULT_API_URL)" if api else "Not supported: migrate is file-mode only")
-    command.add_argument("--folder", default=FOLDER,
-                         help="Notes folder relative to the vault (default: X); also X_BOOKMARK_FOLDER")
-    command.add_argument("--data-dir", type=Path, default=os.environ.get("X_BOOKMARK_DATA_DIR"),
-                         help="Exporter state, receipts, raw JSON and lock (default: <folder>/.x-bookmarks in file "
-                              "mode; required in API mode); also X_BOOKMARK_DATA_DIR")
-
-
-def default_credentials():
-    config = Path.home() / ".config"
-    current, old = config / "x2vault/credentials.json", config / "x-bookmark-exporter/credentials.json"
-    if not current.exists() and old.exists():
-        print(f"Using old credentials at {old}; move them to {current}.", flush=True)
-        return old
-    return current
+    target.add_argument("--spall", metavar="URL", help="Spall base URL (Spall mode; token from X2VAULT_SPALL_TOKEN; "
+                        "also X2VAULT_SPALL_URL)" if api else "Not supported: migrate is file-mode only")
+    command.add_argument("--bookmarks-folder", default=FOLDER,
+                         help="Notes folder relative to the vault (default: X); also X2VAULT_BOOKMARKS_FOLDER")
+    command.add_argument("--data-dir", type=Path, default=os.environ.get("X2VAULT_DATA_DIR"),
+                         help="Exporter state, receipts, raw JSON and lock (default: <folder>/.x2vault in file "
+                              "mode; required in Spall mode); also X2VAULT_DATA_DIR")
 
 
 def main():
     parser = argparse.ArgumentParser(description="Export individual X bookmarks and media to Markdown")
-    parser.add_argument("--credentials", type=Path,
+    parser.add_argument("--credentials", type=Path, default=Path.home() / ".config/x2vault/credentials.json",
                         help="OAuth credentials file (default: ~/.config/x2vault/credentials.json)")
     commands = parser.add_subparsers(dest="command", required=True)
     auth = commands.add_parser("login", help="Authorize your own X developer app")
-    auth.add_argument("--client-id", default=os.environ.get("X_CLIENT_ID"))
+    auth.add_argument("--client-id", default=os.environ.get("X2VAULT_X_CLIENT_ID"))
     auth.add_argument("--redirect-uri", default="http://127.0.0.1:8765/callback")
     export = commands.add_parser("export", help="Save posts/media, then remove successfully exported bookmarks")
     add_target(export)
@@ -68,14 +59,12 @@ def main():
     monitor.add_argument("--keep-bookmarks", action="store_true")
     monitor.add_argument("--api-vocabulary", choices=["tweet", "post"], default="tweet")
     for command in (export, monitor):
-        command.add_argument("--assets-folder", default=os.environ.get("X_BOOKMARK_ASSETS_FOLDER"),
-                             help="Media folder relative to vault root (default: assets inside the notes folder); also X_BOOKMARK_ASSETS_FOLDER")
-        command.add_argument("--max-media-mb", type=positive_number, default=os.environ.get("X_BOOKMARK_MAX_MEDIA_MB"),
-                             help="Skip larger media with a partial-note warning (default: 10 in API mode, "
-                                  "unlimited in file mode); also X_BOOKMARK_MAX_MEDIA_MB")
+        command.add_argument("--assets-folder", default=os.environ.get("X2VAULT_ASSETS_FOLDER"),
+                             help="Media folder relative to vault root (default: assets inside the notes folder); also X2VAULT_ASSETS_FOLDER")
+        command.add_argument("--max-media-mb", type=positive_number, default=os.environ.get("X2VAULT_MAX_MEDIA_MB"),
+                             help="Skip larger media with a partial-note warning (default: 10 in Spall mode, "
+                                  "unlimited in file mode); also X2VAULT_MAX_MEDIA_MB")
     args = parser.parse_args()
-    if args.credentials is None:
-        args.credentials = default_credentials()
     args.credentials = args.credentials.expanduser().resolve()
     args.credentials.parent.mkdir(parents=True, exist_ok=True)
     lock_path = args.credentials.with_suffix(".lock")
@@ -90,37 +79,37 @@ def main():
             fcntl.flock(credential_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             if args.command == "login":
                 if not args.client_id:
-                    parser.error("Provide --client-id or X_CLIENT_ID")
+                    parser.error("Provide --client-id or X2VAULT_X_CLIENT_ID")
                 login(args.credentials, args.client_id, args.redirect_uri)
                 return
             if args.command == "export" and args.limit is not None and args.limit < 1:
                 parser.error("--limit must be positive")
             if args.command == "watch" and args.interval < 60:
                 parser.error("--interval must be at least 60 seconds")
-            if args.vault is None and args.vault_api is None and args.command != "migrate":
-                args.vault_api = os.environ.get("X_VAULT_API_URL")
-            if args.vault_api is not None:
+            if args.vault is None and args.spall is None and args.command != "migrate":
+                args.spall = os.environ.get("X2VAULT_SPALL_URL")
+            if args.spall is not None:
                 if args.command == "migrate":
                     parser.error("migrate works only on a local vault: use --vault PATH")
                 if args.data_dir is None:
-                    parser.error("API mode requires --data-dir or X_BOOKMARK_DATA_DIR (state must stay out of the vault)")
+                    parser.error("Spall mode requires --data-dir or X2VAULT_DATA_DIR (state must stay out of the vault)")
                 internal = args.data_dir.expanduser().resolve()
                 limit = args.max_media_mb if args.max_media_mb is not None else 10
-                output = ApiStore(args.vault_api, os.environ.get("X_VAULT_API_TOKEN"), args.folder, internal,
+                output = SpallStore(args.spall, os.environ.get("X2VAULT_SPALL_TOKEN"), args.bookmarks_folder, internal,
                                   max_media_bytes=int(float(limit) * 2**20))
                 assets_dir = None
                 if args.assets_folder is not None:
                     assets_dir = PurePosixPath("/") / vault_path(args.assets_folder, "--assets-folder")
             else:
                 if args.vault is None:
-                    parser.error("Provide exactly one of --vault PATH or --vault-api URL")
+                    parser.error("Provide exactly one of --vault PATH or --spall URL")
                 vault = args.vault.expanduser().resolve()
-                output = (vault / args.folder).resolve()
+                output = (vault / args.bookmarks_folder).resolve()
                 if not output.is_relative_to(vault):
-                    parser.error("--folder must remain inside the vault")
+                    parser.error("--bookmarks-folder must remain inside the vault")
                 assets_dir = assets_directory(vault, output, args.assets_folder) if args.command != "migrate" else None
                 output.mkdir(parents=True, exist_ok=True)
-                internal = args.data_dir.expanduser().resolve() if args.data_dir else output / ".x-bookmarks"
+                internal = args.data_dir.expanduser().resolve() if args.data_dir else output / ".x2vault"
                 limit = getattr(args, "max_media_mb", None)
             internal.mkdir(parents=True, exist_ok=True)
             with (internal / "lock").open("a") as lock:

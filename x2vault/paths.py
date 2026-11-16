@@ -9,6 +9,6 @@ def assets_directory(vault: Path, output: Path, folder=None):
         raise ValueError("--assets-folder must be a nonempty relative path within the vault")
     if not path.is_relative_to(vault):
         raise ValueError("--assets-folder must remain inside the vault (including symlinks)")
-    if any(part in {".x-bookmarks", ".obsidian"} for part in path.relative_to(vault).parts):
+    if any(part in {".x2vault", ".obsidian"} for part in path.relative_to(vault).parts):
         raise ValueError("--assets-folder must not use export state or Obsidian configuration directories")
     return path

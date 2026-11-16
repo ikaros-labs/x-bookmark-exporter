@@ -2,7 +2,7 @@
 
 Paths given to a store are relative to the notes folder, exactly as they appear in
 receipts (e.g. ``note.md`` or ``../assets/123/1.jpg``). Receipt entries under
-``.x-bookmarks/`` are exporter-internal and always live in the local data dir.
+``.x2vault/`` are exporter-internal and always live in the local data dir.
 """
 import contextlib
 import hashlib
@@ -16,7 +16,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path, PurePosixPath
 
-INTERNAL = ".x-bookmarks/"
+INTERNAL = ".x2vault/"
 
 
 def digest(path):
@@ -41,7 +41,7 @@ class FileStore:
 
     def __init__(self, output, data_dir=None, max_media_bytes=None):
         self.root = Path(output)
-        self.data_dir = Path(data_dir) if data_dir is not None else self.root / ".x-bookmarks"
+        self.data_dir = Path(data_dir) if data_dir is not None else self.root / ".x2vault"
         self.max_media_bytes = max_media_bytes
 
     def local(self, relative):
@@ -88,7 +88,7 @@ class FileStore:
         return path.is_file() and digest(path) == expected
 
 
-class ApiStore:
+class SpallStore:
     """Writes through Spall with a create-only token (no update or delete)."""
 
     retries = 3
@@ -96,12 +96,12 @@ class ApiStore:
 
     def __init__(self, base_url, token, folder, data_dir, max_media_bytes=None, sleep=time.sleep, timeout=120):
         if urllib.parse.urlsplit(base_url).scheme not in {"http", "https"}:
-            raise ValueError("--vault-api must be an http(s) URL")
+            raise ValueError("--spall must be an http(s) URL")
         if not token:
-            raise ValueError("Set X_VAULT_API_TOKEN for --vault-api")
+            raise ValueError("Set X2VAULT_SPALL_TOKEN for --spall")
         self.base = base_url.rstrip("/") + "/v1/files/"
         self.token = token
-        self.root = PurePosixPath("/") / vault_path(folder, "--folder")
+        self.root = PurePosixPath("/") / vault_path(folder, "--bookmarks-folder")
         self.data_dir = Path(data_dir)
         self.max_media_bytes = max_media_bytes
         self.sleep = sleep
@@ -209,7 +209,7 @@ class ApiStore:
 
 
 def vault_path(folder, option):
-    """Validates a vault-relative folder for API mode."""
+    """Validates a vault-relative folder for Spall mode."""
     if not folder or not folder.strip() or folder.startswith("/"):
         raise ValueError(f"{option} must be a nonempty path relative to the vault")
     parts = PurePosixPath(posixpath.normpath(folder)).parts

@@ -1,10 +1,10 @@
 """Opt-in contract tests against a real Spall server. No X API calls are made.
 
-    XBM_API_CONTRACT=1 XBM_API_URL=http://127.0.0.1:18787 XBM_API_TOKEN=vlt_... \\
-    XBM_API_VAULT=/path/to/the/served/vault [XBM_FIXTURE_STATE=/path/to/inbox/.x-bookmarks] \\
+    X2VAULT_TEST_SPALL=1 X2VAULT_TEST_SPALL_URL=http://127.0.0.1:18787 X2VAULT_TEST_SPALL_TOKEN=spl_... \\
+    X2VAULT_TEST_VAULT=/path/to/the/served/vault [X2VAULT_TEST_FIXTURE_STATE=/path/to/inbox/.x2vault] \\
     python3 -m unittest discover -s tests -p test_contract.py -v
 
-The token's account needs read and create on "3. Resources/X". XBM_API_VAULT is the
+The token's account needs read and create on "3. Resources/X". X2VAULT_TEST_VAULT is the
 local folder the server serves, used to check what arrived on disk.
 """
 import contextlib
@@ -27,7 +27,7 @@ from x2vault import cli
 from x2vault.export import verified
 from x2vault.store import FileStore
 
-ENABLED = os.environ.get("XBM_API_CONTRACT") == "1"
+ENABLED = os.environ.get("X2VAULT_TEST_SPALL") == "1"
 FOLDER, ASSETS = "3. Resources/X/inbox", "3. Resources/X/assets"
 IMAGE = b"\x89PNG\r\n\x1a\n" + bytes(range(256)) * 200
 VIDEO_SIZE = 11 * 2**20
@@ -93,20 +93,20 @@ def snapshot(vault):
     return {p.relative_to(vault).as_posix(): p.stat().st_mtime_ns for p in vault.rglob("*") if p.is_file()}
 
 
-@unittest.skipUnless(ENABLED, "set XBM_API_CONTRACT=1 and XBM_API_URL/TOKEN/VAULT to run")
+@unittest.skipUnless(ENABLED, "set X2VAULT_TEST_SPALL=1 and X2VAULT_TEST_SPALL_URL/TOKEN/VAULT to run")
 class ContractTests(unittest.TestCase):
     def setUp(self):
-        self.url, self.vault = os.environ["XBM_API_URL"], Path(os.environ["XBM_API_VAULT"])
+        self.url, self.vault = os.environ["X2VAULT_TEST_SPALL_URL"], Path(os.environ["X2VAULT_TEST_VAULT"])
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.tmp = Path(tmp.name)
-        self.env = patch.dict(os.environ, {"X_VAULT_API_TOKEN": os.environ["XBM_API_TOKEN"]})
+        self.env = patch.dict(os.environ, {"X2VAULT_SPALL_TOKEN": os.environ["X2VAULT_TEST_SPALL_TOKEN"]})
         self.env.start()
         self.addCleanup(self.env.stop)
 
     def argv(self, data_dir):
-        return ["--credentials", str(self.tmp / "credentials.json"), "watch", "--once", "--vault-api", self.url,
-                "--data-dir", str(data_dir), "--folder", FOLDER, "--assets-folder", ASSETS]
+        return ["--credentials", str(self.tmp / "credentials.json"), "watch", "--once", "--spall", self.url,
+                "--data-dir", str(data_dir), "--bookmarks-folder", FOLDER, "--assets-folder", ASSETS]
 
     def test_export_three_posts(self):
         base = str(int(time.time() * 1000))
@@ -132,8 +132,8 @@ class ContractTests(unittest.TestCase):
         state = json.loads((self.tmp / "state/state-9.json").read_text())
         for post_id in client.posts:
             for name, expected in state[post_id]["files"].items():
-                if name.startswith(".x-bookmarks/"):
-                    local = self.tmp / "state" / name.removeprefix(".x-bookmarks/")
+                if name.startswith(".x2vault/"):
+                    local = self.tmp / "state" / name.removeprefix(".x2vault/")
                 else:
                     local = self.vault / FOLDER / name
                 self.assertEqual(hashlib.sha256(local.read_bytes()).hexdigest(), expected, name)
@@ -142,13 +142,13 @@ class ContractTests(unittest.TestCase):
         note = next((self.vault / FOLDER).glob(f"* - {video}.md")).read_text()
         self.assertIn('export_status: "partial"', note)
         self.assertIn(f"https://x.com/i/status/{video}", note)
-        self.assertEqual([p for p in self.vault.rglob("*") if ".x-bookmarks" in p.parts], [])
+        self.assertEqual([p for p in self.vault.rglob("*") if ".x2vault" in p.parts], [])
         self.assertTrue((self.tmp / "state/receipts").is_dir())
 
-    @unittest.skipUnless(os.environ.get("XBM_FIXTURE_STATE"), "set XBM_FIXTURE_STATE to an existing .x-bookmarks")
+    @unittest.skipUnless(os.environ.get("X2VAULT_TEST_FIXTURE_STATE"), "set X2VAULT_TEST_FIXTURE_STATE to an existing .x2vault")
     def test_cutover_from_copied_state(self):
         data = self.tmp / "state"
-        shutil.copytree(os.environ["XBM_FIXTURE_STATE"], data, ignore=shutil.ignore_patterns("lock"))
+        shutil.copytree(os.environ["X2VAULT_TEST_FIXTURE_STATE"], data, ignore=shutil.ignore_patterns("lock"))
         user_id = re.fullmatch(r"state-(\d+)\.json", next(p.name for p in data.glob("state-*.json"))).group(1)
         posts = sorted(re.search(r"(\d+)\.md$", p.name).group(1) for p in (self.vault / FOLDER).glob("*.md"))
         state = json.loads((data / f"state-{user_id}.json").read_text())

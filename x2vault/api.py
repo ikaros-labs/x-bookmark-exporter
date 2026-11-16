@@ -34,7 +34,7 @@ class APIError(RuntimeError):
 
 def token_request(client_id, form):
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    secret = os.environ.get("X_CLIENT_SECRET")
+    secret = os.environ.get("X2VAULT_X_CLIENT_SECRET")
     if secret:
         headers["Authorization"] = "Basic " + base64.b64encode(f"{client_id}:{secret}".encode()).decode()
     form["client_id"] = client_id

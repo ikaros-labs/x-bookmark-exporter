@@ -21,8 +21,8 @@ class NamingTests(unittest.TestCase):
                      "includes": {"users": [{"id": "9", "username": "alice"}]}}
 
     def legacy(self):
-        root = self.output / ".x-bookmarks"
-        raw = ".x-bookmarks/raw/123.json"
+        root = self.output / ".x2vault"
+        raw = ".x2vault/raw/123.json"
         write_json(self.output / raw, self.item)
         body = "\n".join(line for line in render(self.item, []).split("\n") if not line.startswith("first_seen_at:"))
         atomic_write(self.output / "123.md", body.encode())
