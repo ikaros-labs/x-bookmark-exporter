@@ -10,6 +10,7 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
+from . import USER_AGENT
 from .storage import write_json
 
 BASE = "https://api.x.com/2"
@@ -33,7 +34,7 @@ class APIError(RuntimeError):
 
 
 def token_request(client_id, form):
-    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    headers = {"Content-Type": "application/x-www-form-urlencoded", "User-Agent": USER_AGENT}
     secret = os.environ.get("X2VAULT_X_CLIENT_SECRET")
     if secret:
         headers["Authorization"] = "Basic " + base64.b64encode(f"{client_id}:{secret}".encode()).decode()
@@ -127,7 +128,7 @@ class Client:
         failures = 0
         while True:
             request = urllib.request.Request(url, method=method, headers={
-                "Authorization": "Bearer " + self.token["access_token"]})
+                "Authorization": "Bearer " + self.token["access_token"], "User-Agent": USER_AGENT})
             try:
                 with urllib.request.urlopen(request, timeout=60) as response:
                     return json.load(response)
