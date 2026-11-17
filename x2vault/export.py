@@ -9,6 +9,7 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import USER_AGENT
 from .storage import atomic_write, write_json
 from .naming import filename
 from .articles import article_text, media_keys
@@ -47,8 +48,9 @@ def download(url, path, limit=None):
     fd, name = tempfile.mkstemp(dir=path.parent, prefix=".media-")
     try:
         with os.fdopen(fd, "wb") as stream:
-            # Do not send the API bearer token to a media host.
-            with urllib.request.urlopen(url, timeout=60) as response:
+            # Do not send the API bearer token to a media host; only a User-Agent.
+            request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(request, timeout=60) as response:
                 if urllib.parse.urlsplit(response.url).scheme != "https":
                     raise ValueError("Insecure media redirect")
                 content_type = response.headers.get_content_type()

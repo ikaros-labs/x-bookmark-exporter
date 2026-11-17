@@ -1,4 +1,4 @@
-"""A minimal in-memory stand-in for Spall's /v1/files endpoints and frontmatter PATCH."""
+"""A minimal in-memory stand-in for Spall's /v1/files endpoints (create, If-Match replace) and frontmatter PATCH."""
 import hashlib
 import json
 import threading
@@ -53,7 +53,14 @@ class Handler(BaseHTTPRequestHandler):
         if self.command == "PUT":
             body = self.rfile.read(int(self.headers["Content-Length"]))
             if path in server.files:
-                return self.reply(409, b'{"error":{"code":"already_exists"}}')
+                if "If-Match" not in self.headers or "*" in self.headers.get("If-None-Match", ""):
+                    return self.reply(409, b'{"error":{"code":"already_exists"}}')
+                if not server.can_update:
+                    return self.reply(403, b'{"error":{"code":"forbidden"}}')
+                if self.headers["If-Match"].strip('"') != rev(server.files[path]):
+                    return self.reply(412)
+                server.files[path] = body
+                return self.reply(200, headers={"ETag": f'"{rev(body)}"'})
             server.files[path] = body
             return self.reply(201, headers={"ETag": f'"{rev(body)}"'})
         if path not in server.files:

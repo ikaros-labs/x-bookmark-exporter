@@ -11,7 +11,7 @@ from .export import process
 from .storage import write_json
 from .migration import migrate
 from .monitor import watch
-from .posts import export_posts
+from .posts import export_posts, repair_posts_media
 from .paths import assets_directory
 from .store import SpallStore, FileStore, vault_path
 
@@ -67,11 +67,15 @@ def main():
     own.add_argument("--budget", type=int, default=int(POSTS_BUDGET),
                      help="Billable post reads per UTC day, shared with watch (default: 200); "
                           "also X2VAULT_POSTS_DAILY_READ_BUDGET")
-    for command in (monitor, own):
+    repair = commands.add_parser("repair-media", help="Download media that failed for saved posts (the "
+                                 "'Media N not saved' lines) from saved data, with no X API calls; watch does this "
+                                 "30 posts per poll")
+    add_target(repair)
+    for command in (monitor, own, repair):
         command.add_argument("--posts-folder", default=POSTS_FOLDER,
                              help="Folder for your own posts, relative to the vault; replies go to its replies/ "
                                   "subfolder (default: 3. Resources/X/my posts); also X2VAULT_POSTS_FOLDER")
-    for command in (export, monitor, own):
+    for command in (export, monitor, own, repair):
         command.add_argument("--assets-folder", default=os.environ.get("X2VAULT_ASSETS_FOLDER"),
                              help="Media folder relative to vault root (default: assets inside the notes folder); also X2VAULT_ASSETS_FOLDER")
         command.add_argument("--max-media-mb", type=positive_number, default=os.environ.get("X2VAULT_MAX_MEDIA_MB"),
@@ -113,7 +117,7 @@ def main():
                 assets_dir = None
                 if args.assets_folder is not None:
                     assets_dir = PurePosixPath("/") / vault_path(args.assets_folder, "--assets-folder")
-                if args.command in {"watch", "posts"}:
+                if args.command in {"watch", "posts", "repair-media"}:
                     posts_store = SpallStore(args.spall, os.environ.get("X2VAULT_SPALL_TOKEN"), args.posts_folder,
                                              internal, max_media_bytes=int(float(limit) * 2**20), option="--posts-folder")
                     posts_args = dict(assets_dir=assets_dir, folder=vault_path(args.posts_folder, "--posts-folder"))
@@ -128,7 +132,7 @@ def main():
                 output.mkdir(parents=True, exist_ok=True)
                 internal = args.data_dir.expanduser().resolve() if args.data_dir else output / ".x2vault"
                 limit = getattr(args, "max_media_mb", None)
-                if args.command in {"watch", "posts"}:
+                if args.command in {"watch", "posts", "repair-media"}:
                     posts_out = (vault / args.posts_folder).resolve()
                     if not posts_out.is_relative_to(vault) or posts_out == vault:
                         parser.error("--posts-folder must be a folder inside the vault")
@@ -138,7 +142,7 @@ def main():
             internal.mkdir(parents=True, exist_ok=True)
             with (internal / "lock").open("a") as lock:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                if isinstance(output, Path) and args.command == "posts":
+                if isinstance(output, Path) and args.command in {"posts", "repair-media"}:
                     output = None
                 elif isinstance(output, Path):
                     print(f"Migrated {migrate(output, internal)} existing notes.", flush=True)
@@ -148,6 +152,9 @@ def main():
                 client = Client(args.credentials)
                 if args.command == "posts":
                     export_posts(client, posts_store, args.budget, **posts_args)
+                    return
+                if args.command == "repair-media":
+                    repair_posts_media(client, posts_store, **posts_args)
                     return
                 if args.command == "watch":
                     after = None if args.no_posts else lambda: export_posts(client, posts_store, int(POSTS_BUDGET),

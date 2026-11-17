@@ -36,6 +36,9 @@ REFERENCED = {
     "user.fields": "id,name,username",
 }
 STATS = {"tweet.fields": "id,public_metrics"}
+REPAIR_PER_POLL = 30
+REPAIR_TRIES = 3
+NOT_SAVED = re.compile(r"^> Media (\d+) not saved \(.*\); see the original post\.$", re.M)
 PRIVATE_STATS = {"tweet.fields": "id,public_metrics,non_public_metrics"}
 
 
@@ -160,6 +163,7 @@ class PostsExport:
             self.state.setdefault(key, {})
         self.budget = Budget(self.state, budget, self.today)
         self.out_of_budget = False
+        self.media_failed = 0
 
     def save(self):
         write_json(self.path, self.state)
@@ -167,6 +171,7 @@ class PostsExport:
     def run(self):
         self.base()
         self.refresh()
+        self.repair_media()  # before process(): a failure from this pass is first retried on the next one
         self.fetch()
         written = self.process()
         self.save()
@@ -174,7 +179,8 @@ class PostsExport:
         day = self.state["budget"]
         print(f"Posts: {written} saved, {len(self.state['pending'])} pending, {len(self.state['posts'])} total. "
               f"Reads: {self.budget.own} own + {self.budget.others} others ≈ ${cost:.3f} "
-              f"(today {day['own'] + day['others']}/{self.budget.limit}).", flush=True)
+              f"(today {day['own'] + day['others']}/{self.budget.limit}). Media failed: {self.media_failed}.",
+              flush=True)
         if self.out_of_budget:
             print(f"Posts: daily read budget of {self.budget.limit} reached; continuing on the next UTC day "
                   "(raise it with --budget or X2VAULT_POSTS_DAILY_READ_BUDGET).", flush=True)
@@ -310,22 +316,10 @@ class PostsExport:
             note_dir = Path(os.path.dirname(relative) or ".")
             links, warnings = [], []
             for index, key in enumerate(post.get("attachments", {}).get("media_keys", []), 1):
-                source = None
                 try:
-                    if key not in media:
-                        raise ValueError("missing from the API response")
-                    source, extension = media_source(media[key])
-                    base = self.assets_dir if self.assets_dir is not None else self.store.root / "assets"
-                    target = Path(os.path.relpath(base / post_id / f"{index}{extension}", self.store.root)).as_posix()
-                    limit = {"limit": self.store.max_media_bytes} if self.store.max_media_bytes is not None else {}
-                    with self.store.staging(target) as temp:
-                        download(source, temp, **limit)
-                        self.store.create(target, temp)
-                    links.append((urllib.parse.quote(Path(os.path.relpath(target, note_dir)).as_posix(), safe="/.-_~"),
-                                  media[key].get("alt_text", "")))
+                    links.append(self.save_media(item, index, key, media, note_dir))
                 except (OSError, ValueError) as error:  # StoreError (vault write) fails the post instead
                     warnings.append(f"Media {index} not saved ({error}); see the original post.")
-                    print(f"{post_id}: warning: media {key} not saved: {error} ({source})", flush=True)
             item.update(path=relative, body=render(item, self.handle, links, warnings, item["fetched_at"]))
             write_json(self.store.data_dir / f"posts/raw/{post_id}.json", item)
             self.save()
@@ -335,6 +329,94 @@ class PostsExport:
                                         "sha256": hashlib.sha256(item["body"].encode()).hexdigest()}
         del self.state["pending"][post_id]
         print(f"{post_id}: saved {relative}", flush=True)
+
+    def save_media(self, item, index, key, media, note_dir):
+        """Download one attachment to assets/<id>/<index>.<ext> (create-only); returns (link, alt)."""
+        post_id = item["post"]["id"]
+        source = None
+        try:
+            if key not in media:
+                raise ValueError("missing from the API response")
+            source, extension = media_source(media[key])
+            base = self.assets_dir if self.assets_dir is not None else self.store.root / "assets"
+            target = Path(os.path.relpath(base / post_id / f"{index}{extension}", self.store.root)).as_posix()
+            limit = {"limit": self.store.max_media_bytes} if self.store.max_media_bytes is not None else {}
+            with self.store.staging(target) as temp:
+                download(source, temp, **limit)
+                self.store.create(target, temp)
+        except (OSError, ValueError) as error:
+            self.media_failed += 1
+            host = urllib.parse.urlsplit(source).hostname if source else None
+            print(f"{post_id}: warning: media {key} not saved from {host or 'unknown host'}: {error} ({source})",
+                  flush=True)
+            raise
+        return (urllib.parse.quote(Path(os.path.relpath(target, note_dir)).as_posix(), safe="/.-_~"),
+                media[key].get("alt_text", ""))
+
+    def repair_media(self, limit=REPAIR_PER_POLL):
+        """Fill in "Media N not saved" lines of saved notes from the raw JSON, without X API calls.
+
+        Up to `limit` affected posts per call; each media item gets REPAIR_TRIES downloads, then
+        its line stays. Only those lines change: frontmatter and the user's other edits are kept.
+        """
+        repair = self.state.setdefault("media_repair", {})
+        if repair.get("forbidden_day") == self.today:
+            return 0
+        done, tries = repair.setdefault("done", []), repair.setdefault("tries", {})
+        finished, repaired, attempted = set(done), 0, 0
+        for post_id, record in self.state["posts"].items():
+            if post_id in finished:
+                continue
+            raw = self.store.data_dir / f"posts/raw/{post_id}.json"
+            item = read_json(raw)
+            if not NOT_SAVED.search(item.get("body", "")):
+                done.append(post_id)  # nothing was missing at export time
+                continue
+            if attempted >= limit:
+                break
+            attempted += 1
+            media = {m["media_key"]: m for m in item["includes"].get("media", [])}
+            keys = item["post"].get("attachments", {}).get("media_keys", [])
+            note_dir = Path(os.path.dirname(record["path"]) or ".")
+            embeds, left = {}, 0
+            for index in sorted({int(i) for i in NOT_SAVED.findall(item["body"])}):
+                tag = f"{post_id}/{index}"
+                if tries.get(tag, 0) >= REPAIR_TRIES or not 0 < index <= len(keys):
+                    continue
+                try:
+                    link, alt = self.save_media(item, index, keys[index - 1], media, note_dir)
+                    embeds[index] = f"![]({link})" + (f"\n\n{alt}" if alt else "")
+                except (OSError, ValueError, RuntimeError) as error:
+                    if isinstance(error, RuntimeError):  # vault write (StoreError); download errors are logged
+                        print(f"{post_id}: warning: media {index} not stored: {error}", flush=True)
+                    tries[tag] = tries.get(tag, 0) + 1
+                    left += tries[tag] < REPAIR_TRIES
+            if embeds:
+                def fill(text):
+                    return NOT_SAVED.sub(lambda m: embeds.get(int(m.group(1)), m.group(0)), text)
+                try:
+                    self.store.rewrite(record["path"], fill)
+                except UpdateForbidden as error:
+                    print(f"Posts: warning: media not repaired: {error}. Grant update on the posts folder.", flush=True)
+                    repair["forbidden_day"] = self.today
+                    self.save()
+                    return repaired
+                except (OSError, ValueError, RuntimeError) as error:
+                    print(f"{post_id}: warning: media repair not written: {error}", flush=True)
+                    self.save()
+                    continue
+                item["body"] = fill(item["body"])  # the raw copy tracks which lines are left
+                write_json(raw, item)
+                repaired += 1
+                print(f"{post_id}: repaired {len(embeds)} media in {record['path']}", flush=True)
+            if not left:
+                done.append(post_id)
+                for index in embeds:
+                    tries.pop(f"{post_id}/{index}", None)
+            self.save()
+        if attempted:
+            print(f"Media repair: {repaired} notes repaired, {attempted} checked.", flush=True)
+        return repaired
 
     def refresh(self):
         """Once per UTC day: re-read stats of posts younger than 14 days, then they are frozen.
@@ -393,3 +475,11 @@ class PostsExport:
 
 def export_posts(client, store, budget=200, assets_dir=None, folder=None):
     return PostsExport(client, store, budget, assets_dir, folder).run()
+
+
+def repair_posts_media(client, store, assets_dir=None, folder=None):
+    """One repair pass over every affected saved post (no per-poll cap), with no X API calls."""
+    export = PostsExport(client, store, 0, assets_dir, folder)
+    count = export.repair_media(limit=len(export.state["posts"]))
+    export.save()
+    return count

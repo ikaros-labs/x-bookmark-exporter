@@ -238,6 +238,14 @@ python3 -m x2vault posts --vault /absolute/path/to/vault --budget 1000
   ```
 
   Without `update`, the exporter logs a warning and skips the refresh.
+- **Missing media repair:** a note whose media failed to download keeps a line like
+  `> Media 1 not saved (HTTP Error 403: Forbidden); see the original post.` Each poll, up
+  to 30 such posts are retried from the saved raw JSON (no X API calls): the media is
+  downloaded to the usual assets path and only that line is replaced by the embed, so the
+  frontmatter and your other edits stay. A media item that fails 3 times keeps its line.
+  `x2vault repair-media` (same target options as `posts`) does one pass over all of them.
+  In Spall mode this replaces the note with `PUT` and `If-Match`, so it also needs
+  `update` on the posts folder. Bookmark notes are not rewritten.
 - **Cost and budget:** X charges per post returned: $0.001 for posts read from your own
   timeline (an "Owned Read" when the app belongs to you) and $0.005 for posts looked up
   by ID (reply parents and quoted posts, fetched in batches of up to 100), even when they

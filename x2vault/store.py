@@ -17,6 +17,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path, PurePosixPath
 
+from . import USER_AGENT
+
 INTERNAL = ".x2vault/"
 
 
@@ -123,6 +125,21 @@ class FileStore:
             os.replace(temp, path)
         fsync_directory(path.parent)
 
+    def rewrite(self, relative, transform):
+        """Atomic rewrite of a note's text through transform(text); True if it changed."""
+        path = self.local(relative)
+        if not path.is_file():
+            raise StoreError(f"Note missing: {relative}")
+        text = path.read_text()
+        updated = transform(text)
+        if updated == text:
+            return False
+        with self.staging(relative) as temp:
+            temp.write_text(updated)
+            os.replace(temp, path)
+        fsync_directory(path.parent)
+        return True
+
 
 class SpallStore:
     """Writes through Spall: create-only for files; frontmatter updates need `update`."""
@@ -160,10 +177,12 @@ class SpallStore:
     def url(self, relative, kind="files"):
         return self.api + kind + "/" + "/".join(urllib.parse.quote(part, safe="") for part in self.vault_path(relative).split("/"))
 
-    def request(self, method, relative, headers=None, body=None, ok=(), kind="files"):
-        """Retries network errors and 5xx; returns (status, headers) for 2xx/3xx or listed codes."""
+    def request(self, method, relative, headers=None, body=None, ok=(), kind="files", read=False):
+        """Retries network errors and 5xx; returns (status, headers) for 2xx/3xx or listed codes,
+        plus the response body with read=True."""
         url = self.url(relative, kind)
         headers = dict(headers or {}, Authorization="Bearer " + self.token)
+        headers["User-Agent"] = USER_AGENT
         attempt = limited = 0
         while True:
             stream = None
@@ -178,11 +197,13 @@ class SpallStore:
                     headers["Content-Length"] = str(os.fstat(stream.fileno()).st_size)
                 request = urllib.request.Request(url, data=data, method=method, headers=headers)
                 with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                    if read:
+                        return response.status, response.headers, response.read()
                     return response.status, response.headers
             except urllib.error.HTTPError as error:
                 error.close()
                 if error.code < 400 or error.code in ok:
-                    return error.code, error.headers
+                    return (error.code, error.headers, b"") if read else (error.code, error.headers)
                 if error.code == 429 and limited < self.rate_limit_waits:
                     limited += 1
                     try:
@@ -261,6 +282,27 @@ class SpallStore:
             if status != 412:
                 return
         raise StoreError(f"Note kept changing during the stats update: {self.vault_path(relative)}")
+
+    def rewrite(self, relative, transform):
+        """GET the note, then PUT transform(text) with If-Match on its rev; needs `update`."""
+        for _ in range(3):
+            status, headers, data = self.request("GET", relative, ok=(404,), read=True)
+            if status == 404:
+                raise StoreError(f"Note missing: {self.vault_path(relative)}")
+            if not headers.get("ETag"):
+                raise StoreError(f"Spall sent no ETag for {self.vault_path(relative)}")
+            text = data.decode()
+            updated = transform(text)
+            if updated == text:
+                return False
+            status, _ = self.request("PUT", relative, {"Content-Type": "application/octet-stream",
+                                                       "If-Match": headers.get("ETag", "")},
+                                     updated.encode(), ok=(403, 412))
+            if status == 403:
+                raise UpdateForbidden(f"The Spall account lacks update on {self.vault_path(relative)}")
+            if status != 412:
+                return True
+        raise StoreError(f"Note kept changing during the media repair: {self.vault_path(relative)}")
 
 
 def vault_path(folder, option):

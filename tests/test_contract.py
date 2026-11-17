@@ -80,8 +80,9 @@ def run(argv, client):
     log = io.StringIO()
     real = urllib.request.urlopen
     def urlopen(url, timeout):
-        # Media hosts are faked; Spall requests (Request objects) go to the real server.
-        return FakeMedia(url) if isinstance(url, str) and url.startswith("https://media.example/") else real(url, timeout=timeout)
+        # Media hosts are faked; Spall requests go to the real server.
+        target = getattr(url, "full_url", url)
+        return FakeMedia(target) if target.startswith("https://media.example/") else real(url, timeout=timeout)
     with patch.object(sys, "argv", ["x2vault", *argv]), patch("x2vault.cli.Client", return_value=client), \
             patch("urllib.request.urlopen", side_effect=urlopen), \
             contextlib.redirect_stdout(log):
